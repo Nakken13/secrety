@@ -98,3 +98,12 @@ def test_non_utf8_rules_file_raises_rule_error(tmp_path: Path) -> None:
 def test_unreadable_rules_file_raises_rule_error(tmp_path: Path) -> None:
     with pytest.raises(RuleError, match="cannot read"):
         load_rules(tmp_path)  # a directory cannot be read as a file
+
+
+@pytest.mark.parametrize("field", ["id", "description", "regex"])
+def test_required_fields_must_be_strings(field: str) -> None:
+    raw = {"id": "a", "description": "A", "regex": "x"}
+    raw[field] = 123  # type: ignore[assignment]
+    yaml_text = "rules:\n  - {" + ", ".join(f"{k}: {v}" for k, v in raw.items()) + "}\n"
+    with pytest.raises(RuleError, match=field):
+        parse_rules(yaml_text)

@@ -57,43 +57,41 @@ class Rule:
     keywords: tuple[str, ...] = ()
 
 
+def _is_number(value: Any, *, integer: bool = False) -> bool:
+    """True for YAML ints/floats, rejecting booleans (``bool`` is an ``int`` in Python)."""
+    kinds: type | tuple[type, ...] = int if integer else (int, float)
+    return isinstance(value, kinds) and not isinstance(value, bool)
+
+
 def _build_rule(raw: Any, index: int, source: str) -> Rule:
     """Validate one raw YAML mapping and turn it into a :class:`Rule`."""
     where = f"{source}: rule #{index}"
     if not isinstance(raw, dict):
         raise RuleError(f"{where}: expected a mapping, got {type(raw).__name__}")
 
-    for field in _REQUIRED:
-        if not raw.get(field):
-            raise RuleError(f"{where}: missing required field '{field}'")
+    for name in _REQUIRED:
+        if not raw.get(name):
+            raise RuleError(f"{where}: missing required field '{name}'")
+        if not isinstance(raw[name], str):
+            raise RuleError(f"{where}: field '{name}' must be a string, got {raw[name]!r}")
     unknown = set(raw) - set(_REQUIRED) - set(_OPTIONAL)
     if unknown:
         raise RuleError(f"{where} ({raw['id']}): unknown field(s) {sorted(unknown)}")
 
-    rule_id = str(raw["id"])
-    where = f"{where} ({rule_id})"
+    where = f"{where} ({raw['id']})"
     try:
-        pattern = re.compile(str(raw["regex"]))
+        pattern = re.compile(raw["regex"])
     except re.error as exc:
         raise RuleError(f"{where}: invalid regex: {exc}") from exc
 
-    # bool is a subclass of int in Python: reject it explicitly (``true`` in YAML).
     secret_group = raw.get("secret_group", 0)
-    if (
-        isinstance(secret_group, bool)
-        or not isinstance(secret_group, int)
-        or not 0 <= secret_group <= pattern.groups
-    ):
+    if not _is_number(secret_group, integer=True) or not 0 <= secret_group <= pattern.groups:
         raise RuleError(
             f"{where}: secret_group={secret_group!r} but the regex has {pattern.groups} group(s)"
         )
 
     confidence = raw.get("confidence", DEFAULT_CONFIDENCE)
-    if (
-        isinstance(confidence, bool)
-        or not isinstance(confidence, int | float)
-        or not 0.0 <= confidence <= 1.0
-    ):
+    if not _is_number(confidence) or not 0.0 <= confidence <= 1.0:
         raise RuleError(f"{where}: confidence must be a number in [0, 1], got {confidence!r}")
 
     keywords = raw.get("keywords") or []
@@ -101,8 +99,8 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
         raise RuleError(f"{where}: keywords must be a list of non-empty strings")
 
     return Rule(
-        id=rule_id,
-        description=str(raw["description"]),
+        id=raw["id"],
+        description=raw["description"],
         pattern=pattern,
         secret_group=secret_group,
         confidence=float(confidence),
