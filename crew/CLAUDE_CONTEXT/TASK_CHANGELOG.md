@@ -10,3 +10,4 @@
 - 2026-11-20 ➕ **added to backlog**: `06-integration.md`
 - 2026-11-20 ➕ **added to backlog**: `07-evaluation.md`
 - 2026-11-20 ➕ **added to backlog**: `08-docs-release.md`
+- 2026-11-20 🧹 **lock of a task closed outside the main checkout purged**: `01-regex-detection.md`
