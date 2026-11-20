@@ -4,6 +4,9 @@ Positive cases: (line of code, expected secret). Negative cases: lines that a
 naive rule would flag but this one must not.
 """
 
+import re._constants as _constants
+import re._parser as _parser
+
 import pytest
 
 import fakes
@@ -137,3 +140,27 @@ def test_fake_values_are_marked() -> None:
         public_constant = name.isupper() and not name.startswith("_")
         if public_constant and isinstance(value, str) and name not in fakes.UNMARKABLE:
             assert "FAKE" in value or "EXAMPLE" in value, name
+
+
+def _unbounded_repeats(parsed: object) -> int:
+    """Count repeats with no upper bound in a parsed regex (``re._parser`` tree)."""
+    count = 0
+    for op, arg in parsed:  # type: ignore[attr-defined]
+        if op in (_constants.MAX_REPEAT, _constants.MIN_REPEAT):
+            _low, high, sub = arg
+            count += high == _constants.MAXREPEAT
+            count += _unbounded_repeats(sub)
+        elif op is _constants.SUBPATTERN:
+            count += _unbounded_repeats(arg[-1])
+        elif op is _constants.BRANCH:
+            count += sum(_unbounded_repeats(branch) for branch in arg[1])
+        elif op in (_constants.ASSERT, _constants.ASSERT_NOT):
+            count += _unbounded_repeats(arg[1])
+    return count
+
+
+@pytest.mark.parametrize("rule_id", sorted(RULES))
+def test_default_rules_have_only_bounded_quantifiers(rule_id: str) -> None:
+    """ReDoS guard: no `*`, `+` or `{n,}` anywhere in a bundled rule."""
+    parsed = _parser.parse(RULES[rule_id].pattern.pattern)
+    assert _unbounded_repeats(parsed) == 0

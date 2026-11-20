@@ -30,7 +30,7 @@ rules:
     description: AWS secret access key (40 chars assigned to a *secret_access_key / secret_key name)
     # Covers aws_secret_access_key=, AWS_SECRET_KEY:, JSON "SecretAccessKey":
     # (AWS CLI / STS output) and Terraform secret_key =.
-    regex: '(?i)secret_?(?:access_?)?key["'']?\s*[:=]\s*["'']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])'
+    regex: '(?i)secret_?(?:access_?)?key["'']?\s{0,16}[:=]\s{0,16}["'']?([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])'
     secret_group: 1
     confidence: 0.85
     keywords: [secretkey, secret_key, secretaccess, secret_access]
@@ -111,7 +111,7 @@ rules:
     # SECRET_KEY): "_" is a word character, so a leading \b would miss them.
     # Only quoted values: unquoted ones (.env, YAML) are left to the entropy
     # detector and the classifier, as a regex on them flags function calls.
-    regex: '(?i)(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token)[\w.\-]{0,32}?["'']?\s*(?::=|[:=])\s*["'']([^"''\s$<{%][^"''\s]{7,255})["'']'
+    regex: '(?i)(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token)[\w.\-]{0,32}?["'']?\s{0,16}(?::=|[:=])\s{0,16}["'']([^"''\s$<{%][^"''\s]{7,255})["'']'
     secret_group: 1
     confidence: 0.4
     keywords: [password, passwd, pwd, secret, apikey, api_key, token]
