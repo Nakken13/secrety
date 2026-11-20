@@ -7,6 +7,16 @@ import typer
 from rich.console import Console
 
 from secrety import __version__
+from secrety.detectors import RegexDetector
+from secrety.models import Finding
+from secrety.rules import RuleError, load_rules
+from secrety.scanner import scan as run_scan
+from secrety.sources import FilesystemSource
+from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
+
+EXIT_CLEAN = 0
+EXIT_FINDINGS = 1
+EXIT_ERROR = 2
 
 app = typer.Typer(
     name="secrety",
@@ -14,7 +24,7 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-console = Console()
+console = Console(highlight=False)
 
 
 def _version_callback(value: bool) -> None:
@@ -40,12 +50,52 @@ def main(
     """Scan source code and Git history for exposed secrets."""
 
 
+def _print_findings(findings: list[Finding]) -> None:
+    """Print one line per finding, with the secret masked."""
+    for f in findings:
+        console.print(
+            f"{f.location}  [bold]{f.rule_id}[/bold]  {f.masked()}  "
+            f"[dim](confidence {f.confidence:.2f})[/dim]",
+            soft_wrap=True,
+        )
+
+
 @app.command()
 def scan(
     path: Annotated[
         Path,
         typer.Argument(exists=True, file_okay=True, dir_okay=True, help="File or folder to scan."),
     ] = Path("."),
+    rules: Annotated[
+        Path | None,
+        typer.Option(exists=True, dir_okay=False, help="Custom rules file (YAML)."),
+    ] = None,
+    max_file_size: Annotated[
+        int, typer.Option(min=1, help="Skip files larger than this many bytes.")
+    ] = DEFAULT_MAX_FILE_SIZE,
 ) -> None:
-    """Scan PATH for exposed secrets."""
-    console.print(f"Scanning [bold]{path}[/bold]... (no detector yet)")
+    """Scan PATH for exposed secrets.
+
+    Exit code: 0 if nothing is found, 1 if secrets are found, 2 on error.
+    """
+    try:
+        loaded_rules = load_rules(rules)
+    except RuleError as exc:
+        console.print(f"[red]Error:[/red] {exc}", soft_wrap=True)
+        raise typer.Exit(EXIT_ERROR) from exc
+
+    source = FilesystemSource(path, max_file_size=max_file_size)
+    findings = run_scan(source, [RegexDetector(loaded_rules)])
+    _print_findings(findings)
+
+    stats = source.stats
+    summary = (
+        f"{stats.scanned} file(s) scanned, {stats.skipped_binary} binary and "
+        f"{stats.skipped_large} large file(s) skipped."
+    )
+    if findings:
+        console.print(
+            f"\n[red bold]{len(findings)} potential secret(s) found.[/red bold] {summary}"
+        )
+        raise typer.Exit(EXIT_FINDINGS)
+    console.print(f"[green]No secret found.[/green] {summary}")
