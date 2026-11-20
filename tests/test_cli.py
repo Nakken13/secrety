@@ -72,3 +72,24 @@ def test_module_entry_point_runs() -> None:
     )
     assert result.returncode == 0
     assert __version__ in result.stdout
+
+
+def test_untrusted_paths_and_content_are_not_rich_markup(tmp_path: Path) -> None:
+    hostile = tmp_path / "[bold]"
+    hostile.mkdir()
+    (hostile / "a.py").write_text(
+        f'password = "[/b]{fakes.GENERIC_PASSWORD}"\nk = "{fakes.GITHUB_TOKEN}"\n',
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 1, result.output
+    assert "[bold]/a.py:2" in result.output
+    assert "2 potential secret" in result.output
+
+
+def test_rule_error_message_is_not_rich_markup(tmp_path: Path) -> None:
+    rules = tmp_path / "rules.yaml"
+    rules.write_text("rules:\n  - {id: '[/x]', description: A, regex: '(oops'}\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path), "--rules", str(rules)])
+    assert result.exit_code == 2
+    assert "[/x]" in result.output

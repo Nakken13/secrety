@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from secrety import __version__
 from secrety.detectors import RegexDetector
@@ -51,10 +52,14 @@ def main(
 
 
 def _print_findings(findings: list[Finding]) -> None:
-    """Print one line per finding, with the secret masked."""
+    """Print one line per finding, with the secret masked.
+
+    Paths and secrets come from the scanned (untrusted) files, so they are
+    escaped: a file named ``[link=...]x`` must not be read as Rich markup.
+    """
     for f in findings:
         console.print(
-            f"{f.location}  [bold]{f.rule_id}[/bold]  {f.masked()}  "
+            f"{escape(f.location)}  [bold]{escape(f.rule_id)}[/bold]  {escape(f.masked())}  "
             f"[dim](confidence {f.confidence:.2f})[/dim]",
             soft_wrap=True,
         )
@@ -81,7 +86,7 @@ def scan(
     try:
         loaded_rules = load_rules(rules)
     except RuleError as exc:
-        console.print(f"[red]Error:[/red] {exc}", soft_wrap=True)
+        console.print(f"[red]Error:[/red] {escape(str(exc))}", soft_wrap=True)
         raise typer.Exit(EXIT_ERROR) from exc
 
     source = FilesystemSource(path, max_file_size=max_file_size)
