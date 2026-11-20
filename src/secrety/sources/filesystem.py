@@ -29,42 +29,41 @@ DEFAULT_EXCLUDED_DIRS = frozenset(
     }
 )
 _UTF16_BOMS = (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
 
 
-def is_binary(chunk: bytes) -> bool:
-    """Return True if ``chunk`` looks binary (contains a NUL byte), like Git."""
-    return b"\x00" in chunk
+def is_binary(head: bytes) -> bool:
+    """True if the first bytes of a file contain a NUL, as in Git.
 
-
-def decode(data: bytes) -> str | None:
-    """Decode file bytes to text, or return ``None`` if the file is binary.
-
-    UTF-16 files (the default of PowerShell 5.1 ``Out-File``) are full of NUL
-    bytes, so their byte-order mark is checked before the binary heuristic.
-    Anything else is read as UTF-8, replacing invalid bytes.
+    UTF-16 files (the PowerShell 5.1 ``Out-File`` default) are full of NULs
+    but are text: they are recognised by their byte-order mark.
     """
+    return b"\x00" in head and not head.startswith(_UTF16_BOMS)
+
+
+def decode(data: bytes) -> str:
+    """Decode text bytes: UTF-16 when a BOM says so, else UTF-8 with replacement."""
     if data.startswith(_UTF16_BOMS):
         return data.decode("utf-16", errors="replace")
-    if is_binary(data[:BINARY_SNIFF_SIZE]):
-        return None
     return data.decode("utf-8", errors="replace")
 
 
-def is_link(path: Path) -> bool:
-    """Return True for symbolic links and Windows junctions / reparse points.
+def _is_link(info: os.stat_result) -> bool:
+    """Symbolic link, or Windows junction / reparse point (from ``lstat``).
 
     ``Path.is_symlink`` and ``os.walk(followlinks=False)`` do not recognise
-    NTFS junctions on Python 3.11, so the reparse-point attribute is checked
-    too.
+    NTFS junctions on Python 3.11, hence the reparse-point attribute.
     """
+    attributes = getattr(info, "st_file_attributes", 0)
+    return stat.S_ISLNK(info.st_mode) or bool(attributes & _REPARSE_POINT)
+
+
+def is_link(path: Path) -> bool:
+    """Return True if ``path`` is a symlink or a junction (never followed)."""
     try:
-        info = os.lstat(path)
+        return _is_link(os.lstat(path))
     except OSError:
         return False
-    if stat.S_ISLNK(info.st_mode):
-        return True
-    attributes = getattr(info, "st_file_attributes", 0)
-    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 @dataclass
@@ -85,11 +84,12 @@ class FilesystemSource:
     def __iter__(self) -> Iterator[SourceFile]:
         """Yield every readable text file under :attr:`root`."""
         self.stats = ScanStats()
-        root = Path(self.root)
+        root = self.root
         if not root.exists():
             raise FileNotFoundError(root)
         if root.is_file():
-            yield from self._read(root, root.name)
+            if file := self._read(root, root.name, follow_link=True):
+                yield file
             return
         excluded = set(self.excluded_dirs)
         for dirpath, dirnames, filenames in os.walk(
@@ -100,29 +100,35 @@ class FilesystemSource:
             dirnames[:] = sorted(d for d in dirnames if d not in excluded and not is_link(here / d))
             for name in sorted(filenames):
                 path = here / name
-                if is_link(path):
-                    continue
-                yield from self._read(path, path.relative_to(root).as_posix())
+                if file := self._read(path, path.relative_to(root).as_posix()):
+                    yield file
 
     def _on_walk_error(self, error: OSError) -> None:
         """Count a folder that ``os.walk`` could not list."""
         self.stats.unreadable += 1
 
-    def _read(self, path: Path, rel: str) -> Iterator[SourceFile]:
-        """Yield ``path`` as a :class:`SourceFile` unless it must be skipped."""
+    def _read(self, path: Path, rel: str, follow_link: bool = False) -> SourceFile | None:
+        """Return ``path`` as a :class:`SourceFile`, or ``None`` if skipped.
+
+        One ``lstat`` gives the link check, the file type and the size. Only
+        the first 8 KiB are read before the binary check, so a large binary
+        file is never read in full.
+        """
         try:
-            if not path.is_file():
-                return
-            if path.stat().st_size > self.max_file_size:
+            info = os.stat(path) if follow_link else os.lstat(path)
+            if _is_link(info) or not stat.S_ISREG(info.st_mode):
+                return None
+            if info.st_size > self.max_file_size:
                 self.stats.skipped_large += 1
-                return
-            data = path.read_bytes()
+                return None
+            with path.open("rb") as handle:
+                head = handle.read(BINARY_SNIFF_SIZE)
+                if is_binary(head):
+                    self.stats.skipped_binary += 1
+                    return None
+                data = head + handle.read()
         except OSError:
             self.stats.unreadable += 1
-            return
-        text = decode(data)
-        if text is None:
-            self.stats.skipped_binary += 1
-            return
+            return None
         self.stats.scanned += 1
-        yield SourceFile(path=rel, text=text)
+        return SourceFile(path=rel, text=decode(data))

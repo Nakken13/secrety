@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 import fakes
@@ -95,13 +96,16 @@ def test_rule_error_message_is_not_rich_markup(tmp_path: Path) -> None:
     assert "[/x]" in result.output
 
 
-def test_summary_reports_unreadable_paths(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+def test_summary_reports_unreadable_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "locked.txt").write_text("a", encoding="utf-8")
+    real_open = Path.open
 
-    def deny(self: Path) -> bytes:
-        raise PermissionError("denied")
+    def deny_locked(self: Path, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        if self.name == "locked.txt":
+            raise PermissionError("denied")
+        return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(Path, "read_bytes", deny)
+    monkeypatch.setattr(Path, "open", deny_locked)
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert result.exit_code == 0
     assert "1 path(s) could not be read" in result.output

@@ -119,14 +119,14 @@ def test_unreadable_file_is_counted_and_scan_continues(
     write(tmp_path, "a.txt", "a")
     write(tmp_path, "locked.txt", "b")
     write(tmp_path, "z.txt", "z")
-    real_read_bytes = Path.read_bytes
+    real_open = Path.open
 
-    def fake_read_bytes(self: Path) -> bytes:
+    def fake_open(self: Path, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
         if self.name == "locked.txt":
             raise PermissionError("denied")
-        return real_read_bytes(self)
+        return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+    monkeypatch.setattr(Path, "open", fake_open)
     source = FilesystemSource(tmp_path)
     assert paths(source) == ["a.txt", "z.txt"]
     assert source.stats.unreadable == 1
