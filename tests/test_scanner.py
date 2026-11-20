@@ -4,7 +4,7 @@ import fakes
 from secrety.detectors import RegexDetector
 from secrety.rules import load_rules
 from secrety.scanner import scan
-from secrety.sources import FilesystemSource
+from secrety.sources import FilesystemSource, SourceFile
 
 
 def test_scan_runs_every_detector_on_every_file(tmp_path: Path) -> None:
@@ -21,3 +21,9 @@ def test_scan_runs_every_detector_on_every_file(tmp_path: Path) -> None:
 def test_scan_without_detectors_finds_nothing(tmp_path: Path) -> None:
     (tmp_path / "a.env").write_text(f"TOKEN={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
     assert scan(FilesystemSource(tmp_path), []) == []
+
+
+def test_scan_copies_the_source_commit_onto_findings() -> None:
+    files = [SourceFile(path="a.env", text=f"T={fakes.GITHUB_TOKEN}\n", commit="abc123")]
+    (finding,) = scan(files, [RegexDetector(load_rules())])
+    assert finding.commit == "abc123"

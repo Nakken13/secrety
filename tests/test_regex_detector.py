@@ -84,3 +84,26 @@ def test_overlong_lines_are_skipped() -> None:
     detector = RegexDetector(load_rules(), max_line_length=40)
     assert list(detector.scan(line, "f")) == []
     assert list(RegexDetector(load_rules()).scan(line, "f"))
+
+
+def test_line_numbers_count_only_newlines() -> None:
+    # str.splitlines() also splits on form feed, vertical tab, U+2028...
+    # Git, editors and SARIF count only "\n".
+    text = "a\x0cb\u2028c\n" + f"k={fakes.GITHUB_TOKEN}\n"
+    (finding,) = RegexDetector(load_rules()).scan(text, "f")
+    assert finding.line == 2
+
+
+def test_crlf_lines_are_reported_without_carriage_return() -> None:
+    text = f"first\r\nk={fakes.GITHUB_TOKEN}\r\n"
+    (finding,) = RegexDetector(load_rules()).scan(text, "f")
+    assert finding.line == 2
+    assert finding.line_content == f"k={fakes.GITHUB_TOKEN}"
+
+
+def test_long_lines_are_scanned_by_default() -> None:
+    # Minified bundles often embed keys; with bounded rules there is no need
+    # to drop long lines.
+    line = "x " * 100_000 + fakes.GOOGLE_API_KEY
+    (finding,) = RegexDetector(load_rules()).scan(line, "bundle.min.js")
+    assert finding.rule_id == "google-api-key"
