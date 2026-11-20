@@ -1,9 +1,11 @@
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from secrety.sources import FilesystemSource, SourceFile
+from secrety.sources import FilesystemSource, Source, SourceFile
 
 
 def write(root: Path, rel: str, content: str | bytes) -> Path:
@@ -94,3 +96,85 @@ def test_does_not_follow_symlinks(tmp_path: Path) -> None:
 def test_missing_root_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         list(FilesystemSource(tmp_path / "nope"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS junctions are Windows-only")
+def test_does_not_follow_windows_junctions(tmp_path: Path) -> None:
+    # Junctions need no admin privilege, unlike symlinks, and Python 3.11's
+    # os.walk(followlinks=False) / is_symlink() do not recognise them.
+    write(tmp_path, "outside/secret.txt", "x")
+    root = tmp_path / "root"
+    write(root, "inside.txt", "y")
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(root / "j"), str(tmp_path / "outside")],
+        check=True,
+        capture_output=True,
+    )
+    assert paths(FilesystemSource(root)) == ["inside.txt"]
+
+
+def test_unreadable_file_is_counted_and_scan_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write(tmp_path, "a.txt", "a")
+    write(tmp_path, "locked.txt", "b")
+    write(tmp_path, "z.txt", "z")
+    real_read_bytes = Path.read_bytes
+
+    def fake_read_bytes(self: Path) -> bytes:
+        if self.name == "locked.txt":
+            raise PermissionError("denied")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+    source = FilesystemSource(tmp_path)
+    assert paths(source) == ["a.txt", "z.txt"]
+    assert source.stats.unreadable == 1
+
+
+def test_unreadable_directory_is_counted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write(tmp_path, "a.txt", "a")
+    real_walk = os.walk
+
+    def walk_with_error(top: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        onerror = kwargs.get("onerror")
+        assert callable(onerror), "os.walk must be given an onerror callback"
+        onerror(PermissionError("denied"))
+        yield from real_walk(top, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(os, "walk", walk_with_error)
+    source = FilesystemSource(tmp_path)
+    assert paths(source) == ["a.txt"]
+    assert source.stats.unreadable == 1
+
+
+def test_utf16_file_with_bom_is_text_not_binary(tmp_path: Path) -> None:
+    write(tmp_path, "ps.txt", "token = abc\n".encode("utf-16"))
+    (file,) = FilesystemSource(tmp_path)
+    assert file.text == "token = abc\n"
+
+
+def test_stats_are_reset_on_each_iteration(tmp_path: Path) -> None:
+    write(tmp_path, "a.txt", "a")
+    source = FilesystemSource(tmp_path)
+    list(source)
+    list(source)
+    assert source.stats.scanned == 1
+
+
+def test_explicit_symlink_root_is_followed(tmp_path: Path) -> None:
+    target = write(tmp_path, "real.env", "A=1")
+    link = tmp_path / "link.env"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation not permitted")
+    assert paths(FilesystemSource(link)) == ["link.env"]
+
+
+def test_source_file_commit_defaults_to_none() -> None:
+    assert SourceFile(path="a", text="b").commit is None
+
+
+def test_filesystem_source_satisfies_source_protocol(tmp_path: Path) -> None:
+    assert isinstance(FilesystemSource(tmp_path), Source)

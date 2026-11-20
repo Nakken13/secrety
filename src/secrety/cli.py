@@ -12,7 +12,7 @@ from secrety.detectors import RegexDetector
 from secrety.models import Finding
 from secrety.rules import RuleError, load_rules
 from secrety.scanner import scan as run_scan
-from secrety.sources import FilesystemSource
+from secrety.sources import FilesystemSource, ScanStats
 from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
 
 EXIT_CLEAN = 0
@@ -93,14 +93,19 @@ def scan(
     findings = run_scan(source, [RegexDetector(loaded_rules)])
     _print_findings(findings)
 
-    stats = source.stats
+    console.print(_summary(source.stats), soft_wrap=True)
+    if findings:
+        console.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
+        raise typer.Exit(EXIT_FINDINGS)
+    console.print("[green]No secret found.[/green]")
+
+
+def _summary(stats: ScanStats) -> str:
+    """Describe what was scanned and everything that was skipped."""
     summary = (
-        f"{stats.scanned} file(s) scanned, {stats.skipped_binary} binary and "
+        f"\n{stats.scanned} file(s) scanned, {stats.skipped_binary} binary and "
         f"{stats.skipped_large} large file(s) skipped."
     )
-    if findings:
-        console.print(
-            f"\n[red bold]{len(findings)} potential secret(s) found.[/red bold] {summary}"
-        )
-        raise typer.Exit(EXIT_FINDINGS)
-    console.print(f"[green]No secret found.[/green] {summary}")
+    if stats.unreadable:
+        summary += f" [yellow]{stats.unreadable} path(s) could not be read.[/yellow]"
+    return summary

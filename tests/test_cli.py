@@ -93,3 +93,15 @@ def test_rule_error_message_is_not_rich_markup(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path), "--rules", str(rules)])
     assert result.exit_code == 2
     assert "[/x]" in result.output
+
+
+def test_summary_reports_unreadable_paths(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+
+    def deny(self: Path) -> bytes:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "read_bytes", deny)
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "1 path(s) could not be read" in result.output
