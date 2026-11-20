@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
-_VISIBLE_EDGE = 4
+_MAX_VISIBLE_EDGE = 4
+_MIN_LENGTH_TO_SHOW_EDGES = 20
 _SHORT_SHA = 12
 
 
@@ -39,8 +40,8 @@ class Finding:
     path: str
     line: int
     column: int
-    secret: str
-    line_content: str
+    secret: str = field(repr=False)
+    line_content: str = field(repr=False)
     method: DetectionMethod
     confidence: float
     commit: str | None = None
@@ -51,16 +52,19 @@ class Finding:
             raise ValueError(f"confidence must be in [0, 1], got {self.confidence}")
 
     def masked(self) -> str:
-        """Return the secret with only its first and last 4 characters visible.
+        """Return the secret with at most a quarter of it visible.
 
-        Secrets of 8 characters or fewer are fully hidden, since showing 8 of
-        them would reveal everything.
+        Secrets shorter than 20 characters (typically passwords) are fully
+        hidden. Longer ones keep up to 4 characters at each edge, never more
+        than ``length // 8`` per edge, so at most 25 % is shown. The visible
+        prefix is usually a public marker such as ``ghp_`` or ``AKIA``, which
+        is what a reader needs to recognise the key type.
         """
         n = len(self.secret)
-        if n <= 2 * _VISIBLE_EDGE:
+        if n < _MIN_LENGTH_TO_SHOW_EDGES:
             return "*" * n
-        hidden = "*" * (n - 2 * _VISIBLE_EDGE)
-        return f"{self.secret[:_VISIBLE_EDGE]}{hidden}{self.secret[-_VISIBLE_EDGE:]}"
+        edge = min(_MAX_VISIBLE_EDGE, n // 8)
+        return f"{self.secret[:edge]}{'*' * (n - 2 * edge)}{self.secret[-edge:]}"
 
     @property
     def location(self) -> str:
@@ -72,8 +76,14 @@ class Finding:
     def fingerprint(self) -> str:
         """Stable identifier usable for deduplication and baselines.
 
-        It hashes the secret together with its location, so it never exposes
-        the secret itself.
+        Built from the rule, path, commit and the line with the secret cut
+        out. Two properties follow:
+
+        * the secret itself is never hashed, so a fingerprint published in a
+          JSON/SARIF report cannot be brute-forced back into a short password;
+        * line and column numbers are left out, so the fingerprint survives
+          code being added above the secret.
         """
-        raw = f"{self.rule_id}|{self.path}|{self.line}|{self.column}|{self.secret}"
+        context = self.line_content.replace(self.secret, "").strip()
+        raw = f"{self.rule_id}|{self.path}|{self.commit or ''}|{context}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
