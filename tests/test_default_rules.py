@@ -7,6 +7,7 @@ naive rule would flag but this one must not.
 import pytest
 
 import fakes
+from secrety.detectors import RegexDetector
 from secrety.rules import Rule, load_rules
 
 RULES: dict[str, Rule] = {rule.id: rule for rule in load_rules()}
@@ -90,9 +91,9 @@ NEGATIVE: dict[str, list[str]] = {
 
 
 def first_secret(rule: Rule, line: str) -> str | None:
-    """Return the secret captured by ``rule`` on ``line``, if any."""
-    match = rule.pattern.search(line)
-    return match.group(rule.secret_group) if match else None
+    """Return the secret the real detector reports for ``rule`` on ``line``."""
+    finding = next(iter(RegexDetector([rule]).scan(line, "case.txt")), None)
+    return finding.secret if finding else None
 
 
 def test_every_rule_has_positive_and_negative_cases() -> None:
@@ -131,10 +132,8 @@ def test_rule_ignores_look_alike(rule_id: str, line: str) -> None:
 
 def test_fake_values_are_marked() -> None:
     """Guard rail: test secrets must stay visibly fake."""
-    # Key-file headers are fixed strings with no key material, so no marker fits.
-    exempt = {"PRIVATE_KEY_HEADER", "DH_PRIVATE_KEY_HEADER", "PUTTY_KEY_HEADER"}
     for name in dir(fakes):
         value = getattr(fakes, name)
         public_constant = name.isupper() and not name.startswith("_")
-        if public_constant and isinstance(value, str) and name not in exempt:
+        if public_constant and isinstance(value, str) and name not in fakes.UNMARKABLE:
             assert "FAKE" in value or "EXAMPLE" in value, name

@@ -36,3 +36,8 @@ SLACK_APP_TOKEN = "xapp" + "-1-AFAKE0000-" + pad("0000FAKE", 30)
 SLACK_ROTATING_TOKEN = "xoxe" + "-1-" + pad("FAKErotating", 40)
 DH_PRIVATE_KEY_HEADER = "-----BEGIN " + "DH PRIVATE KEY-----"
 PUTTY_KEY_HEADER = "PuTTY-User-Key-File-" + "3: ssh-ed25519"
+
+# Key-file headers are fixed strings with no key material: no FAKE marker
+# fits in them. Listed here, next to the values, so a new header is exempted
+# where it is declared.
+UNMARKABLE = frozenset({"PRIVATE_KEY_HEADER", "DH_PRIVATE_KEY_HEADER", "PUTTY_KEY_HEADER"})
