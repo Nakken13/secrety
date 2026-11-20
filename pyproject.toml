@@ -71,3 +71,8 @@ addopts = "--strict-markers --cov=secrety --cov-report=term-missing --cov-fail-u
 [tool.coverage.run]
 branch = true
 source = ["secrety"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["tests"]
