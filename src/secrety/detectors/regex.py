@@ -5,6 +5,8 @@ from collections.abc import Iterator, Sequence
 from secrety.models import DetectionMethod, Finding
 from secrety.rules import Rule
 
+DEFAULT_MAX_LINE_LENGTH = 100_000
+
 
 class RegexDetector:
     """Match each line against a set of :class:`~secrety.rules.Rule`.
@@ -12,11 +14,18 @@ class RegexDetector:
     Scanning is line by line, which gives exact line/column positions and keeps
     memory flat on large files. The trade-off: a secret split across lines is
     missed (a PEM key is still caught through its one-line header).
+
+    Lines longer than ``max_line_length`` are skipped: they are almost always
+    minified or generated code, and capping them bounds the worst-case cost of
+    any custom rule a user adds.
     """
 
-    def __init__(self, rules: Sequence[Rule]) -> None:
+    def __init__(
+        self, rules: Sequence[Rule], max_line_length: int = DEFAULT_MAX_LINE_LENGTH
+    ) -> None:
         """Create a detector for ``rules`` (see :func:`secrety.rules.load_rules`)."""
         self.rules = tuple(rules)
+        self.max_line_length = max_line_length
 
     def scan(self, text: str, path: str) -> Iterator[Finding]:
         """Yield a finding for every rule match in ``text``.
@@ -26,6 +35,8 @@ class RegexDetector:
             path: Path reported in findings.
         """
         for line_no, line in enumerate(text.splitlines(), start=1):
+            if len(line) > self.max_line_length:
+                continue
             lowered = line.lower()
             for rule in self.rules:
                 # Cheap substring test before running the regex.

@@ -1,3 +1,7 @@
+import time
+
+import pytest
+
 import fakes
 from secrety.detectors import Detector, RegexDetector
 from secrety.models import DetectionMethod
@@ -55,3 +59,28 @@ def test_empty_match_is_ignored() -> None:
 
 def test_clean_text_yields_nothing() -> None:
     assert list(RegexDetector(load_rules()).scan("print('hello')\n", "hello.py")) == []
+
+
+ADVERSARIAL_LINES = {
+    # Worst cases found by measurement: with unbounded quantifiers, every word
+    # boundary starts a scan to the end of the line, so time grows as n^2
+    # (url-credentials took 2.4 s here, jwt 3+ s).
+    "url": "a." * 20_000 + "://x",
+    "jwt": "eyJ-" * 20_000,
+    "password": "password = '" + "x" * 50_000,
+}
+
+
+@pytest.mark.parametrize("name", sorted(ADVERSARIAL_LINES))
+def test_adversarial_lines_scan_fast(name: str) -> None:
+    detector = RegexDetector(load_rules())
+    start = time.perf_counter()
+    list(detector.scan(ADVERSARIAL_LINES[name], "minified.js"))
+    assert time.perf_counter() - start < 1.0
+
+
+def test_overlong_lines_are_skipped() -> None:
+    line = "x" * 50 + " " + fakes.GITHUB_TOKEN
+    detector = RegexDetector(load_rules(), max_line_length=40)
+    assert list(detector.scan(line, "f")) == []
+    assert list(RegexDetector(load_rules()).scan(line, "f"))
