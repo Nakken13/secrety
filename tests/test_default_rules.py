@@ -16,6 +16,10 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
     "aws-secret-access-key": [
         (f"aws_secret_access_key = {fakes.AWS_SECRET_ACCESS_KEY}", fakes.AWS_SECRET_ACCESS_KEY),
         (f'AWS_SECRET_KEY: "{fakes.AWS_SECRET_ACCESS_KEY}"', fakes.AWS_SECRET_ACCESS_KEY),
+        # AWS CLI / STS JSON output
+        (f'"SecretAccessKey": "{fakes.AWS_SECRET_ACCESS_KEY}",', fakes.AWS_SECRET_ACCESS_KEY),
+        # Terraform provider block
+        (f'  secret_key = "{fakes.AWS_SECRET_ACCESS_KEY}"', fakes.AWS_SECRET_ACCESS_KEY),
     ],
     "github-token": [(f"token={fakes.GITHUB_TOKEN}", fakes.GITHUB_TOKEN)],
     "github-fine-grained-pat": [
@@ -24,16 +28,32 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
     "stripe-secret-key": [
         (f"stripe.api_key = '{fakes.STRIPE_SECRET_KEY}'", fakes.STRIPE_SECRET_KEY),
         (f"key: {fakes.STRIPE_RESTRICTED_KEY}", fakes.STRIPE_RESTRICTED_KEY),
+        (f"key: {fakes.STRIPE_LONG_SECRET_KEY}", fakes.STRIPE_LONG_SECRET_KEY),
     ],
-    "slack-token": [(f"SLACK_BOT_TOKEN={fakes.SLACK_TOKEN}", fakes.SLACK_TOKEN)],
+    "slack-token": [
+        (f"SLACK_BOT_TOKEN={fakes.SLACK_TOKEN}", fakes.SLACK_TOKEN),
+        (f"SLACK_APP_TOKEN={fakes.SLACK_APP_TOKEN}", fakes.SLACK_APP_TOKEN),
+        (f"refresh: {fakes.SLACK_ROTATING_TOKEN}", fakes.SLACK_ROTATING_TOKEN),
+    ],
     "slack-webhook": [(f'url = "{fakes.SLACK_WEBHOOK}"', fakes.SLACK_WEBHOOK)],
     "google-api-key": [(f"const key = '{fakes.GOOGLE_API_KEY}';", fakes.GOOGLE_API_KEY)],
     "jwt": [(f"Authorization: Bearer {fakes.JWT}", fakes.JWT)],
-    "private-key": [(fakes.PRIVATE_KEY_HEADER, fakes.PRIVATE_KEY_HEADER)],
+    "private-key": [
+        (fakes.PRIVATE_KEY_HEADER, fakes.PRIVATE_KEY_HEADER),
+        (fakes.DH_PRIVATE_KEY_HEADER, fakes.DH_PRIVATE_KEY_HEADER),
+    ],
+    "putty-private-key": [(fakes.PUTTY_KEY_HEADER, fakes.PUTTY_KEY_HEADER)],
     "url-credentials": [(f'DATABASE_URL="{fakes.URL_WITH_CREDENTIALS}"', fakes.URL_PASSWORD)],
     "generic-password-assignment": [
         (f'password = "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),
         (f"'api_key': '{fakes.GENERIC_PASSWORD}'", fakes.GENERIC_PASSWORD),
+        # Keyword inside a longer identifier ("_" is a word character, so the
+        # old leading \b missed all of these).
+        (f'DB_PASSWORD = "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),
+        (f'db_password: "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),
+        (f'client_secret = "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),
+        (f"SECRET_KEY = '{fakes.GENERIC_PASSWORD}'", fakes.GENERIC_PASSWORD),
+        (f'password := "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),  # Go
     ],
 }
 
@@ -51,6 +71,7 @@ NEGATIVE: dict[str, list[str]] = {
     "google-api-key": ["AI" + "zaTooShort"],
     "jwt": ["eyJ" + "hbGciOiJIUzI1NiJ9.only-two-parts"],
     "private-key": ["-----BEGIN PUBLIC KEY-----", "-----BEGIN CERTIFICATE-----"],
+    "putty-private-key": ["PuTTY is a free SSH client"],
     "url-credentials": [
         "https://example.com/path",
         "ssh://git@github.com/org/repo.git",
@@ -62,7 +83,8 @@ NEGATIVE: dict[str, list[str]] = {
         "password = os.environ['PASSWORD']",
         'password = "short"',
         'password = "${PASSWORD}"',
-        "secret_santa_list = []",
+        "pwd = os.getcwd()",
+        "password_hint = None",
     ],
 }
 
@@ -109,8 +131,8 @@ def test_rule_ignores_look_alike(rule_id: str, line: str) -> None:
 
 def test_fake_values_are_marked() -> None:
     """Guard rail: test secrets must stay visibly fake."""
-    # A PEM header is a fixed string with no key material, so no marker fits.
-    exempt = {"PRIVATE_KEY_HEADER"}
+    # Key-file headers are fixed strings with no key material, so no marker fits.
+    exempt = {"PRIVATE_KEY_HEADER", "DH_PRIVATE_KEY_HEADER", "PUTTY_KEY_HEADER"}
     for name in dir(fakes):
         value = getattr(fakes, name)
         public_constant = name.isupper() and not name.startswith("_")
