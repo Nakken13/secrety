@@ -14,7 +14,7 @@ __pycache__/
 graphify-out/*
 !graphify-out/.gitkeep
 
-# Internal state of the crew hooks (regenerated, no value in versioning it)
+# Internal state of the crew hooks (regenerated every turn, no value in versioning it)
 crew/CLAUDE_CONTEXT/.task_state.json
 crew/CLAUDE_CONTEXT/crew_lock.json
 crew/CLAUDE_CONTEXT/crew_ignored.json
@@ -54,3 +54,4 @@ htmlcov/
 # would still trip GitHub push protection)
 evaluation/corpus/
 evaluation/results/raw/
+crew/CLAUDE_CONTEXT/BATCH_LOCKS.md

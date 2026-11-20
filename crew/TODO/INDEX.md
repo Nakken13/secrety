@@ -1,0 +1,11 @@
+# Index TODO
+
+Tasks not started yet. Start = move the file to `crew/CURRENT_TASKS/` (see `CLAUDE.md`).
+
+- [02 Entropy detection](02-entropy-detection.md)
+- [03 Git history scan](03-git-history-scan.md)
+- [04 False-positive reduction and classifier](04-false-positive-reduction.md)
+- [05 Output formats](05-outputs.md)
+- [06 Integration: pre-commit, staged mode, GitHub Action](06-integration.md)
+- [07 Evaluation and benchmark](07-evaluation.md)
+- [08 Docs and release v0.1.0](08-docs-release.md)
