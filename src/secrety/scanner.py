@@ -1,14 +1,22 @@
 """Orchestration: feed every file of a source to every detector."""
 
-from collections.abc import Iterable, Sequence
-from dataclasses import replace
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 
 from secrety.detectors import Detector
 from secrety.models import Finding
-from secrety.sources import SourceFile
+from secrety.sources import ScanStats, Source
 
 
-def scan(source: Iterable[SourceFile], detectors: Sequence[Detector]) -> list[Finding]:
+@dataclass(frozen=True, slots=True)
+class ScanResult:
+    """Everything a reporter needs: the findings and what was scanned or skipped."""
+
+    findings: list[Finding]
+    stats: ScanStats
+
+
+def scan(source: Source, detectors: Sequence[Detector]) -> ScanResult:
     """Run ``detectors`` on each file of ``source`` and collect the findings.
 
     Detectors only see text and a path; the commit a file comes from (Git
@@ -21,4 +29,4 @@ def scan(source: Iterable[SourceFile], detectors: Sequence[Detector]) -> list[Fi
         for detector in detectors:
             for finding in detector.scan(file.text, file.path):
                 findings.append(replace(finding, commit=file.commit) if file.commit else finding)
-    return findings
+    return ScanResult(findings=findings, stats=source.stats)

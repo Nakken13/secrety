@@ -15,7 +15,6 @@ from secrety.scanner import scan as run_scan
 from secrety.sources import FilesystemSource, ScanStats
 from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
 
-EXIT_CLEAN = 0
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
 
@@ -25,7 +24,7 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-console = Console(highlight=False)
+console = Console(highlight=False, soft_wrap=True)
 
 
 def _version_callback(value: bool) -> None:
@@ -60,8 +59,7 @@ def _print_findings(findings: list[Finding]) -> None:
     for f in findings:
         console.print(
             f"{escape(f.location)}  [bold]{escape(f.rule_id)}[/bold]  {escape(f.masked())}  "
-            f"[dim](confidence {f.confidence:.2f})[/dim]",
-            soft_wrap=True,
+            f"[dim](confidence {f.confidence:.2f})[/dim]"
         )
 
 
@@ -86,16 +84,17 @@ def scan(
     try:
         loaded_rules = load_rules(rules)
     except RuleError as exc:
-        console.print(f"[red]Error:[/red] {escape(str(exc))}", soft_wrap=True)
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
         raise typer.Exit(EXIT_ERROR) from exc
 
-    source = FilesystemSource(path, max_file_size=max_file_size)
-    findings = run_scan(source, [RegexDetector(loaded_rules)])
-    _print_findings(findings)
+    result = run_scan(
+        FilesystemSource(path, max_file_size=max_file_size), [RegexDetector(loaded_rules)]
+    )
+    _print_findings(result.findings)
 
-    console.print(_summary(source.stats), soft_wrap=True)
-    if findings:
-        console.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
+    console.print(_summary(result.stats))
+    if result.findings:
+        console.print(f"[red bold]{len(result.findings)} potential secret(s) found.[/red bold]")
         raise typer.Exit(EXIT_FINDINGS)
     console.print("[green]No secret found.[/green]")
 
