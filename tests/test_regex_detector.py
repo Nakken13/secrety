@@ -79,13 +79,6 @@ def test_adversarial_lines_scan_fast(name: str) -> None:
     assert time.perf_counter() - start < 1.0
 
 
-def test_overlong_lines_are_skipped() -> None:
-    line = "x" * 50 + " " + fakes.GITHUB_TOKEN
-    detector = RegexDetector(load_rules(), max_line_length=40)
-    assert list(detector.scan(line, "f")) == []
-    assert list(RegexDetector(load_rules()).scan(line, "f"))
-
-
 def test_line_numbers_count_only_newlines() -> None:
     # str.splitlines() also splits on form feed, vertical tab, U+2028...
     # Git, editors and SARIF count only "\n".

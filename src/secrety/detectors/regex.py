@@ -22,23 +22,19 @@ class RegexDetector:
 
     Scanning is line by line, which gives exact line/column positions. The
     trade-off: a secret split across lines is missed (a PEM key is still
-    caught through its one-line header).
+    caught through its one-line header). Every line is scanned, however long:
+    the default rules use bounded quantifiers, so their cost stays linear even
+    on minified code.
 
-    Keywords act as a two-level pre-filter: rules whose keywords appear
-    nowhere in the file are dropped once per file, then the remaining rules
-    are only run on lines containing one of their keywords.
-
-    Args:
-        rules: Rules to apply (see :func:`secrety.rules.load_rules`).
-        max_line_length: Optional cap; longer lines are skipped. ``None``
-            (default) scans every line: the default rules use bounded
-            quantifiers, so their cost stays linear even on minified code.
+    Keywords act as a two-level pre-filter, both computed from one lowercase
+    copy of the file: rules whose keywords appear nowhere in the file are
+    dropped once, then the remaining rules only run on lines containing one
+    of their keywords.
     """
 
-    def __init__(self, rules: Sequence[Rule], max_line_length: int | None = None) -> None:
-        """Create a detector for ``rules``."""
+    def __init__(self, rules: Sequence[Rule]) -> None:
+        """Create a detector for ``rules`` (see :func:`secrety.rules.load_rules`)."""
         self.rules = tuple(rules)
-        self.max_line_length = max_line_length
 
     def scan(self, text: str, path: str) -> Iterator[Finding]:
         """Yield a finding for every rule match in ``text``.
@@ -47,13 +43,13 @@ class RegexDetector:
             text: Content of one file.
             path: Path reported in findings.
         """
-        active = self._rules_for(text.lower())
+        lowered_text = text.lower()
+        active = self._rules_for(lowered_text)
         if not active:
             return
-        for line_no, line in iter_lines(text):
-            if self.max_line_length is not None and len(line) > self.max_line_length:
-                continue
-            lowered = line.lower()
+        # lower() never adds or removes line feeds, so both sides have the same lines.
+        lowered_lines = (line for _, line in iter_lines(lowered_text))
+        for (line_no, line), lowered in zip(iter_lines(text), lowered_lines, strict=True):
             for rule in active:
                 if rule.keywords and not any(k in lowered for k in rule.keywords):
                     continue
