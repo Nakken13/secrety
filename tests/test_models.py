@@ -1,5 +1,6 @@
 import pytest
 
+import fakes
 from secrety.models import DetectionMethod, Finding
 
 
@@ -10,8 +11,8 @@ def make_finding(**overrides: object) -> Finding:
         "path": "config/settings.py",
         "line": 12,
         "column": 9,
-        "secret": "AKIAFAKEEXAMPLE23456",
-        "line_content": 'KEY = "AKIAFAKEEXAMPLE23456"',
+        "secret": fakes.AWS_ACCESS_KEY_ID,
+        "line_content": f'KEY = "{fakes.AWS_ACCESS_KEY_ID}"',
         "method": DetectionMethod.REGEX,
         "confidence": 0.9,
     }
@@ -26,7 +27,7 @@ def test_masked_keeps_only_edges() -> None:
 
 
 def test_masked_short_secret_is_fully_hidden() -> None:
-    assert make_finding(secret="abc12345").masked() == "********"
+    assert make_finding(secret="x" * 8).masked() == "********"
 
 
 def test_location_without_commit() -> None:
