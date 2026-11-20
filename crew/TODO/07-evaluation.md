@@ -1,7 +1,7 @@
 # 07 Evaluation and benchmark
 
 Depends on 01-06 (all methods + classifier inference). Largest phase; consider splitting when started (corpus+metrics / training / benchmark+plots).
-Zone : `evaluation/`, `evaluation/`, `src/secrety/data/`, `docs/results/`, `tests/test_eval_*.py`
+Zone : `evaluation/`, `src/secrety/data/`, `docs/results/`, `tests/test_eval_*.py`
 
 - [ ] Synthetic corpus generator: generated at runtime, fixed seed, never committed (gitignored), fake values only
 - [ ] Marker design: FAKE/EXAMPLE markers must not leak the label. Put markers in surrounding context or equally across positives and decoys. Verify how gitleaks and trufflehog allowlists/stopwords treat marked values and document findings
