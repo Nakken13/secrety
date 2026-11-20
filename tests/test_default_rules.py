@@ -1,0 +1,118 @@
+"""Each default rule must catch its format and ignore look-alikes.
+
+Positive cases: (line of code, expected secret). Negative cases: lines that a
+naive rule would flag but this one must not.
+"""
+
+import pytest
+
+import fakes
+from secrety.rules import Rule, load_rules
+
+RULES: dict[str, Rule] = {rule.id: rule for rule in load_rules()}
+
+POSITIVE: dict[str, list[tuple[str, str]]] = {
+    "aws-access-key-id": [(f'key = "{fakes.AWS_ACCESS_KEY_ID}"', fakes.AWS_ACCESS_KEY_ID)],
+    "aws-secret-access-key": [
+        (f"aws_secret_access_key = {fakes.AWS_SECRET_ACCESS_KEY}", fakes.AWS_SECRET_ACCESS_KEY),
+        (f'AWS_SECRET_KEY: "{fakes.AWS_SECRET_ACCESS_KEY}"', fakes.AWS_SECRET_ACCESS_KEY),
+    ],
+    "github-token": [(f"token={fakes.GITHUB_TOKEN}", fakes.GITHUB_TOKEN)],
+    "github-fine-grained-pat": [
+        (f"GH_TOKEN={fakes.GITHUB_FINE_GRAINED_PAT}", fakes.GITHUB_FINE_GRAINED_PAT)
+    ],
+    "stripe-secret-key": [
+        (f"stripe.api_key = '{fakes.STRIPE_SECRET_KEY}'", fakes.STRIPE_SECRET_KEY),
+        (f"key: {fakes.STRIPE_RESTRICTED_KEY}", fakes.STRIPE_RESTRICTED_KEY),
+    ],
+    "slack-token": [(f"SLACK_BOT_TOKEN={fakes.SLACK_TOKEN}", fakes.SLACK_TOKEN)],
+    "slack-webhook": [(f'url = "{fakes.SLACK_WEBHOOK}"', fakes.SLACK_WEBHOOK)],
+    "google-api-key": [(f"const key = '{fakes.GOOGLE_API_KEY}';", fakes.GOOGLE_API_KEY)],
+    "jwt": [(f"Authorization: Bearer {fakes.JWT}", fakes.JWT)],
+    "private-key": [(fakes.PRIVATE_KEY_HEADER, fakes.PRIVATE_KEY_HEADER)],
+    "url-credentials": [(f'DATABASE_URL="{fakes.URL_WITH_CREDENTIALS}"', fakes.URL_PASSWORD)],
+    "generic-password-assignment": [
+        (f'password = "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),
+        (f"'api_key': '{fakes.GENERIC_PASSWORD}'", fakes.GENERIC_PASSWORD),
+    ],
+}
+
+NEGATIVE: dict[str, list[str]] = {
+    "aws-access-key-id": ["AKIA" + "fake", "MY" + fakes.AWS_ACCESS_KEY_ID],
+    "aws-secret-access-key": [
+        f"checksum = {fakes.AWS_SECRET_ACCESS_KEY}",  # 40 chars but no AWS context
+        "aws_secret_access_key = os.environ['AWS_SECRET_ACCESS_KEY']",
+    ],
+    "github-token": ["ghp" + "_tooShort123"],
+    "github-fine-grained-pat": ["github" + "_pat_" + "short"],
+    "stripe-secret-key": ["pk" + "_live_" + fakes.pad("FAKEpublishable", 24)],  # public key
+    "slack-token": ["xox" + "z-not-a-real-prefix-0000"],
+    "slack-webhook": ["https://hooks.slack.com/services/"],
+    "google-api-key": ["AI" + "zaTooShort"],
+    "jwt": ["eyJ" + "hbGciOiJIUzI1NiJ9.only-two-parts"],
+    "private-key": ["-----BEGIN PUBLIC KEY-----", "-----BEGIN CERTIFICATE-----"],
+    "url-credentials": [
+        "https://example.com/path",
+        "ssh://git@github.com/org/repo.git",
+        "postgres://user:${DB_PASSWORD}@db:5432/app",
+        "redis://user:<password>@localhost",
+    ],
+    "generic-password-assignment": [
+        'password = ""',
+        "password = os.environ['PASSWORD']",
+        'password = "short"',
+        'password = "${PASSWORD}"',
+        "secret_santa_list = []",
+    ],
+}
+
+
+def first_secret(rule: Rule, line: str) -> str | None:
+    """Return the secret captured by ``rule`` on ``line``, if any."""
+    match = rule.pattern.search(line)
+    return match.group(rule.secret_group) if match else None
+
+
+def test_every_rule_has_positive_and_negative_cases() -> None:
+    assert set(POSITIVE) == set(RULES)
+    assert set(NEGATIVE) == set(RULES)
+
+
+def test_default_rules_have_keywords() -> None:
+    for rule in RULES.values():
+        assert rule.keywords, f"{rule.id} has no pre-filter keyword"
+
+
+def test_keywords_appear_in_positive_cases() -> None:
+    """The pre-filter must never hide a true positive."""
+    for rule_id, cases in POSITIVE.items():
+        for line, _ in cases:
+            lowered = line.lower()
+            assert any(k in lowered for k in RULES[rule_id].keywords), (rule_id, line)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "line", "expected"),
+    [(rid, line, secret) for rid, cases in POSITIVE.items() for line, secret in cases],
+)
+def test_rule_detects_fake_secret(rule_id: str, line: str, expected: str) -> None:
+    assert first_secret(RULES[rule_id], line) == expected
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "line"),
+    [(rid, line) for rid, lines in NEGATIVE.items() for line in lines],
+)
+def test_rule_ignores_look_alike(rule_id: str, line: str) -> None:
+    assert first_secret(RULES[rule_id], line) is None
+
+
+def test_fake_values_are_marked() -> None:
+    """Guard rail: test secrets must stay visibly fake."""
+    # A PEM header is a fixed string with no key material, so no marker fits.
+    exempt = {"PRIVATE_KEY_HEADER"}
+    for name in dir(fakes):
+        value = getattr(fakes, name)
+        public_constant = name.isupper() and not name.startswith("_")
+        if public_constant and isinstance(value, str) and name not in exempt:
+            assert "FAKE" in value or "EXAMPLE" in value, name
