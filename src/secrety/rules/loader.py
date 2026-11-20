@@ -27,6 +27,7 @@ import yaml
 
 DEFAULT_RULES_RESOURCE = "default_rules.yaml"
 DEFAULT_CONFIDENCE = 0.5
+SUPPORTED_VERSION = 1
 _REQUIRED = ("id", "description", "regex")
 _OPTIONAL = ("secret_group", "confidence", "keywords")
 
@@ -76,19 +77,28 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
     except re.error as exc:
         raise RuleError(f"{where}: invalid regex: {exc}") from exc
 
+    # bool is a subclass of int in Python: reject it explicitly (``true`` in YAML).
     secret_group = raw.get("secret_group", 0)
-    if not isinstance(secret_group, int) or not 0 <= secret_group <= pattern.groups:
+    if (
+        isinstance(secret_group, bool)
+        or not isinstance(secret_group, int)
+        or not 0 <= secret_group <= pattern.groups
+    ):
         raise RuleError(
             f"{where}: secret_group={secret_group!r} but the regex has {pattern.groups} group(s)"
         )
 
     confidence = raw.get("confidence", DEFAULT_CONFIDENCE)
-    if not isinstance(confidence, int | float) or not 0.0 <= confidence <= 1.0:
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, int | float)
+        or not 0.0 <= confidence <= 1.0
+    ):
         raise RuleError(f"{where}: confidence must be a number in [0, 1], got {confidence!r}")
 
     keywords = raw.get("keywords") or []
-    if not isinstance(keywords, list):
-        raise RuleError(f"{where}: keywords must be a list")
+    if not isinstance(keywords, list) or not all(isinstance(k, str) and k for k in keywords):
+        raise RuleError(f"{where}: keywords must be a list of non-empty strings")
 
     return Rule(
         id=rule_id,
@@ -96,7 +106,7 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
         pattern=pattern,
         secret_group=secret_group,
         confidence=float(confidence),
-        keywords=tuple(str(k).lower() for k in keywords),
+        keywords=tuple(k.lower() for k in keywords),
     )
 
 
@@ -120,6 +130,9 @@ def parse_rules(text: str, source: str = "<string>") -> list[Rule]:
 
     if not isinstance(document, dict) or "rules" not in document:
         raise RuleError(f"{source}: expected a top-level 'rules' key")
+    version = document.get("version", SUPPORTED_VERSION)
+    if version != SUPPORTED_VERSION:
+        raise RuleError(f"{source}: unsupported version {version!r} (expected {SUPPORTED_VERSION})")
     raw_rules = document["rules"]
     if not isinstance(raw_rules, list):
         raise RuleError(f"{source}: 'rules' must be a list")
@@ -136,8 +149,16 @@ def parse_rules(text: str, source: str = "<string>") -> list[Rule]:
 
 
 def load_rules(path: Path | None = None) -> list[Rule]:
-    """Load rules from ``path``, or the bundled default rules when ``None``."""
+    """Load rules from ``path``, or the bundled default rules when ``None``.
+
+    Raises:
+        RuleError: If the file cannot be read or decoded, or is malformed.
+    """
     if path is None:
         resource = files("secrety.rules").joinpath(DEFAULT_RULES_RESOURCE)
         return parse_rules(resource.read_text(encoding="utf-8"), source=DEFAULT_RULES_RESOURCE)
-    return parse_rules(path.read_text(encoding="utf-8"), source=str(path))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RuleError(f"{path}: cannot read rules file: {exc}") from exc
+    return parse_rules(text, source=str(path))

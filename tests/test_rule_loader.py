@@ -67,3 +67,34 @@ def test_invalid_rules_raise_clear_error(yaml_text: str, message: str) -> None:
 def test_error_names_source_and_rule() -> None:
     with pytest.raises(RuleError, match=r"test\.yaml.*rule #1"):
         parse_rules("rules:\n  - id: a\n    regex: 'x'\n", source="test.yaml")
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "message"),
+    [
+        ("rules:\n  - {id: a, description: A, regex: '(x)', secret_group: true}\n", "secret_group"),
+        ("rules:\n  - {id: a, description: A, regex: x, confidence: true}\n", "confidence"),
+        ("rules:\n  - {id: a, description: A, regex: x, keywords: [null]}\n", "keywords"),
+        ("rules:\n  - {id: a, description: A, regex: x, keywords: [3]}\n", "keywords"),
+        ("version: 2\nrules: []\n", "version"),
+    ],
+)
+def test_loader_rejects_odd_yaml_values(yaml_text: str, message: str) -> None:
+    with pytest.raises(RuleError, match=message):
+        parse_rules(yaml_text)
+
+
+def test_version_is_optional() -> None:
+    assert parse_rules("rules: []\n") == []
+
+
+def test_non_utf8_rules_file_raises_rule_error(tmp_path: Path) -> None:
+    path = tmp_path / "rules.yaml"
+    path.write_bytes(b"rules: []\n# \xff\xfe\n")
+    with pytest.raises(RuleError, match="cannot read"):
+        load_rules(path)
+
+
+def test_unreadable_rules_file_raises_rule_error(tmp_path: Path) -> None:
+    with pytest.raises(RuleError, match="cannot read"):
+        load_rules(tmp_path)  # a directory cannot be read as a file
