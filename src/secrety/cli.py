@@ -1,14 +1,15 @@
 """Command-line interface for secrety."""
 
-import re
+import io
+import sys
 from collections.abc import Sequence
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
-from rich.markup import escape
 
 from secrety import __version__
 from secrety.allowlist import FilterResult
@@ -22,6 +23,7 @@ from secrety.config import (
 )
 from secrety.detectors import Detector, EntropyDetector, RegexDetector
 from secrety.models import Finding
+from secrety.reporters import render_json, render_sarif, render_text, safe
 from secrety.rules import load_rules, unbounded_rule_warnings
 from secrety.scanner import scan as run_scan
 from secrety.sources import FilesystemSource, ScanStats
@@ -29,9 +31,16 @@ from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
 
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
-# C0 controls, DEL and C1 controls: ESC or CSI could drive the terminal.
-_CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
 _DATE_FORMATS = ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]
+
+
+class OutputFormat(StrEnum):
+    """Report formats accepted by ``--format``."""
+
+    TEXT = "text"
+    JSON = "json"
+    SARIF = "sarif"
+
 
 app = typer.Typer(
     name="secrety",
@@ -41,6 +50,8 @@ app = typer.Typer(
 )
 # emoji=False: a location such as "a.py:100:3" would print ":100:" as an emoji.
 console = Console(highlight=False, soft_wrap=True, emoji=False)
+# Status lines of a json/sarif run: stdout must hold the report alone.
+_stderr_console = Console(stderr=True, highlight=False, soft_wrap=True, emoji=False)
 
 
 def _version_callback(value: bool) -> None:
@@ -64,37 +75,6 @@ def main(
     ] = False,
 ) -> None:
     """Scan source code and Git history for exposed secrets."""
-
-
-def _safe(text: str) -> str:
-    """Make untrusted text (paths, authors, rule ids) safe to print.
-
-    Control characters (ESC, CSI...) are shown as hex escapes so they cannot
-    drive the terminal, then Rich markup is escaped (a file named
-    ``[link=...]x`` stays literal).
-    """
-    return escape(_CONTROL_CHARS.sub(lambda m: f"\\x{ord(m.group()):02x}", text))
-
-
-def _print_findings(findings: list[Finding]) -> None:
-    """Print one line per finding, with the secret masked.
-
-    Paths and secrets come from the scanned (untrusted) files, so they are
-    escaped: a file named ``[link=...]x`` must not be read as Rich markup.
-    """
-    for f in findings:
-        # Rule ids may come from a custom rules file: escaped like the rest.
-        details = [f"confidence {f.confidence:.2f}"]
-        if f.also_matched:
-            details.append("also: " + ", ".join(rule_id for rule_id, _ in f.also_matched))
-        if f.author:
-            details.append(f"by {f.author}" + (f" on {f.date[:10]}" if f.date else ""))
-        if f.removed_later:
-            details.append("removed from HEAD, still in history")
-        console.print(
-            f"{_safe(f.location)}  [bold]{_safe(f.rule_id)}[/bold]  {_safe(f.masked())}  "
-            f"[dim]({_safe('; '.join(details))})[/dim]"
-        )
 
 
 @app.command()
@@ -157,11 +137,26 @@ def scan(
         float | None,
         typer.Option(help="With --classifier: minimum probability (0-1) to keep a finding."),
     ] = None,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Report format. json and sarif keep stdout for the report alone "
+            "(status lines go to stderr). Secrets are always masked.",
+        ),
+    ] = OutputFormat.TEXT,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", dir_okay=False, help="Write the report to this file."),
+    ] = None,
 ) -> None:
     """Scan PATH for exposed secrets.
 
     Exit code: 0 if nothing is found, 1 if secrets are found, 2 on error.
     """
+    # Chosen first: nothing but the report may reach stdout in a json/sarif run.
+    info = console if output_format is OutputFormat.TEXT and output is None else _stderr_console
     if not git_history and (max_commits is not None or since is not None):
         _fail("--max-commits and --since need --git.")
     if classifier_threshold is not None and not classifier:
@@ -179,10 +174,10 @@ def scan(
         _fail(str(exc), exc)
     if rules is not None:  # bundled rules are bounded, and tested to stay so
         for warning in unbounded_rule_warnings(loaded_rules):
-            console.print(f"[yellow]Warning: {_safe(warning)}[/yellow]")
+            info.print(f"[yellow]Warning: {safe(warning)}[/yellow]")
     detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]
     if git_history:
-        findings, stats = _scan_history(path, detectors, max_file_size, max_commits, since)
+        findings, stats = _scan_history(path, detectors, max_file_size, max_commits, since, info)
     else:
         result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
         findings, stats = result.findings, result.stats
@@ -192,30 +187,51 @@ def scan(
     if model is not None:
         rescored = model.rescore(findings)
         findings = rescored.kept
-    _print_findings(findings)
+    _write_report(findings, output_format, output)
 
     if file_config.source is not None:
-        console.print(f"\nConfig: {_safe(str(file_config.source))}")
-    console.print(_summary(stats) + _suppressed(filtered))
+        info.print(f"\nConfig: {safe(str(file_config.source))}")
+    info.print(_summary(stats) + _suppressed(filtered))
     if model is not None and rescored is not None:
-        console.print(
+        info.print(
             f"{rescored.dropped} finding(s) below the classifier threshold "
             f"{model.threshold:.2f} dropped."
         )
         if model.stub:
-            console.print(
+            info.print(
                 "[yellow]Warning: the packaged classifier is an untrained stub "
                 "(hand-set weights); its scores are rough.[/yellow]"
             )
     if findings:
-        console.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
+        info.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
         raise typer.Exit(EXIT_FINDINGS)
-    console.print("[green]No secret found.[/green]")
+    info.print("[green]No secret found.[/green]")
+
+
+def _write_report(findings: list[Finding], fmt: OutputFormat, output: Path | None) -> None:
+    """Render ``findings`` in ``fmt`` to ``output``, or to stdout when it is ``None``."""
+    if fmt is OutputFormat.TEXT:
+        if output is None:
+            render_text(console, findings)
+            return
+        buffer = io.StringIO()
+        # No colour codes in a file, and a wide line must not be wrapped.
+        render_text(Console(file=buffer, highlight=False, emoji=False, width=10_000), findings)
+        document = buffer.getvalue()
+    else:
+        document = (render_json if fmt is OutputFormat.JSON else render_sarif)(findings)
+    if output is None:
+        sys.stdout.write(document)
+        return
+    try:
+        output.write_text(document, encoding="utf-8")
+    except OSError as exc:
+        _fail(f"cannot write {output}: {exc}", exc)
 
 
 def _fail(message: str, cause: BaseException | None = None) -> NoReturn:
     """Print ``message`` as an error and exit with :data:`EXIT_ERROR`."""
-    console.print(f"[red]Error:[/red] {_safe(message)}")
+    _stderr_console.print(f"[red]Error:[/red] {safe(message)}")
     raise typer.Exit(EXIT_ERROR) from cause
 
 
@@ -225,6 +241,7 @@ def _scan_history(
     max_file_size: int,
     max_commits: int | None,
     since: datetime | None,
+    info: Console,
 ) -> tuple[list[Finding], ScanStats]:
     """Scan the Git history at ``path``, marking secrets no longer in ``HEAD``."""
     # Imported here: GitPython fails at import time when git is not installed,
@@ -240,7 +257,7 @@ def _scan_history(
     except ValueError as exc:
         _fail(str(exc), exc)
     if result.shallow:
-        console.print(
+        info.print(
             "[yellow]Warning: shallow clone. Older history is missing, and the oldest "
             "commit is reported as adding every file it contains.[/yellow]"
         )
