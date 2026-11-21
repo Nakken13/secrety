@@ -346,3 +346,19 @@ def test_classifier_threshold_needs_classifier(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path), "--classifier-threshold", "0.2"])
     assert result.exit_code == 2
     assert "--classifier" in result.output
+
+
+def test_custom_rules_with_unbounded_quantifier_warn(tmp_path: Path) -> None:
+    rules = tmp_path / "rules.yaml"
+    rules.write_text(
+        "rules:\n  - {id: greedy, description: G, regex: 'DEMO-[0-9]+'}\n", encoding="utf-8"
+    )
+    target = tmp_path / "src"
+    target.mkdir()
+    result = runner.invoke(app, ["scan", str(target), "--rules", str(rules)])
+    assert result.exit_code == 0  # a warning, not an error
+    assert "Warning: rule 'greedy': unbounded quantifier(s) +" in result.output
+
+
+def test_bundled_rules_print_no_quantifier_warning(tmp_path: Path) -> None:
+    assert "unbounded" not in runner.invoke(app, ["scan", str(tmp_path)]).output

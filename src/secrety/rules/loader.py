@@ -19,6 +19,8 @@ rule, so that a typo in a custom rule never fails silently.
 from __future__ import annotations
 
 import re
+import re._parser as _sre_parser  # the parser behind re.compile (3.11+)
+from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -28,6 +30,10 @@ import yaml
 
 DEFAULT_RULES_RESOURCE = "default_rules.yaml"
 DEFAULT_CONFIDENCE = 0.5
+# Greedy, lazy and possessive (a++, Python 3.11+) repetitions.
+_REPEATS = frozenset(
+    {_sre_parser.MAX_REPEAT, _sre_parser.MIN_REPEAT, _sre_parser.POSSESSIVE_REPEAT}
+)
 SUPPORTED_VERSION = 1
 _REQUIRED = ("id", "description", "regex")
 _OPTIONAL = ("secret_group", "confidence", "keywords", "paths")
@@ -173,3 +179,47 @@ def load_rules(path: Path | None = None) -> list[Rule]:
     except (OSError, UnicodeDecodeError) as exc:
         raise RuleError(f"{path}: cannot read rules file: {exc}") from exc
     return parse_rules(text, source=str(path))
+
+
+def unbounded_quantifiers(pattern: str) -> list[str]:
+    r"""Return the unbounded repetitions (``+``, ``*``, ``{n,}``, lazy too) in ``pattern``.
+
+    The regex is parsed by the standard library's own parser, so escaped
+    characters (``\+``) and character classes (``[+*]``) are not mistaken for
+    quantifiers. An unbounded repetition followed by more pattern can backtrack
+    for a long time on a long line (ReDoS); the bundled rules bound every one.
+    """
+    found: list[str] = []
+    _collect_unbounded(_sre_parser.parse(pattern), found)
+    return found
+
+
+def _collect_unbounded(node: Any, found: list[str]) -> None:
+    """Walk a parsed regex, appending a label for each unbounded repetition."""
+    for op, av in node:
+        if op in _REPEATS:
+            low, high, _ = av
+            if high == _sre_parser.MAXREPEAT:
+                found.append({0: "*", 1: "+"}.get(low, f"{{{low},}}"))
+        _collect_in(av, found)
+
+
+def _collect_in(value: Any, found: list[str]) -> None:
+    """Recurse into every sub-pattern nested in an opcode argument."""
+    if isinstance(value, _sre_parser.SubPattern):
+        _collect_unbounded(value, found)
+    elif isinstance(value, tuple | list):
+        for item in value:
+            _collect_in(item, found)
+
+
+def unbounded_rule_warnings(rules: Iterable[Rule]) -> list[str]:
+    """Return one warning per rule whose regex has an unbounded repetition."""
+    warnings = []
+    for rule in rules:
+        if quantifiers := unbounded_quantifiers(rule.pattern.pattern):
+            warnings.append(
+                f"rule {rule.id!r}: unbounded quantifier(s) {' '.join(quantifiers)} "
+                "can make a scan very slow on long lines (ReDoS); bound them, e.g. {1,256}."
+            )
+    return warnings

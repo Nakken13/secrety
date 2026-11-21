@@ -22,7 +22,7 @@ from secrety.config import (
 )
 from secrety.detectors import Detector, EntropyDetector, RegexDetector
 from secrety.models import Finding
-from secrety.rules import load_rules
+from secrety.rules import load_rules, unbounded_rule_warnings
 from secrety.scanner import scan as run_scan
 from secrety.sources import FilesystemSource, ScanStats
 from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
@@ -177,6 +177,9 @@ def scan(
         model = load_classifier(threshold=classifier_threshold) if classifier else None
     except ValueError as exc:
         _fail(str(exc), exc)
+    if rules is not None:  # bundled rules are bounded, and tested to stay so
+        for warning in unbounded_rule_warnings(loaded_rules):
+            console.print(f"[yellow]Warning: {_safe(warning)}[/yellow]")
     detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]
     if git_history:
         findings, stats = _scan_history(path, detectors, max_file_size, max_commits, since)

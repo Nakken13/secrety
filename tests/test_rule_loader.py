@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from secrety.rules import Rule, RuleError, load_rules, parse_rules
+from secrety.rules import (
+    Rule,
+    RuleError,
+    load_rules,
+    parse_rules,
+    unbounded_quantifiers,
+    unbounded_rule_warnings,
+)
 
 VALID = r"""
 version: 1
@@ -124,3 +131,41 @@ def test_paths_default_to_every_file() -> None:
 def test_invalid_paths_are_rejected(paths: str) -> None:
     with pytest.raises(RuleError, match="paths"):
         parse_rules(f"rules:\n  - {{id: a, description: A, regex: 'abc', paths: {paths}}}\n")
+
+
+# --- unbounded quantifier lint -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("pattern", "count"),
+    [
+        (r"a+", 1),
+        (r"a*", 1),
+        (r"a{3,}", 1),
+        (r"a+?", 1),  # lazy is still unbounded
+        (r"a++", 1),  # possessive too
+        (r"(?:a|b*)c+", 2),  # inside groups and alternations
+        (r"(?=x+)y", 1),  # inside lookarounds
+        (r"a{1,64}", 0),
+        (r"a?b{2}c{0,5}?", 0),
+        (r"\+\*", 0),  # escaped characters are literals
+        (r"[+*]{1,3}", 0),  # inside a character class
+        (r"\{3,\}", 0),
+    ],
+)
+def test_unbounded_quantifiers(pattern: str, count: int) -> None:
+    assert len(unbounded_quantifiers(pattern)) == count
+
+
+def test_bundled_rules_have_no_unbounded_quantifier() -> None:
+    assert unbounded_rule_warnings(load_rules()) == []
+
+
+def test_warnings_name_the_rule(tmp_path: Path) -> None:
+    rules = parse_rules(
+        "version: 1\nrules:\n  - id: greedy\n    description: d\n    regex: 'key=(\\w+)'\n"
+    )
+    warnings = unbounded_rule_warnings(rules)
+    assert len(warnings) == 1
+    assert "greedy" in warnings[0]
+    assert "unbounded" in warnings[0]
