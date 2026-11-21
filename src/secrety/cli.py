@@ -11,11 +11,13 @@ from rich.console import Console
 from rich.markup import escape
 
 from secrety import __version__
+from secrety.allowlist import FilterResult
 from secrety.config import (
     DEFAULT_BASE64_THRESHOLD,
     DEFAULT_HEX_THRESHOLD,
     DEFAULT_MIN_LENGTH,
     EntropyConfig,
+    load_file_config,
 )
 from secrety.detectors import Detector, EntropyDetector, RegexDetector
 from secrety.models import Finding
@@ -135,6 +137,14 @@ def scan(
             formats=_DATE_FORMATS, help="With --git: scan only commits committed after this date."
         ),
     ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True,
+            dir_okay=False,
+            help="Settings file (TOML). Default: .secrety.toml at the scanned folder, if any.",
+        ),
+    ] = None,
 ) -> None:
     """Scan PATH for exposed secrets.
 
@@ -149,6 +159,7 @@ def scan(
             hex_threshold=entropy_hex_threshold,
             min_length=entropy_min_length,
         )
+        file_config = load_file_config(config, path)
     except ValueError as exc:
         _fail(str(exc), exc)
     detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]
@@ -157,9 +168,13 @@ def scan(
     else:
         result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
         findings, stats = result.findings, result.stats
+    filtered = file_config.allowlist.apply(findings)
+    findings = filtered.kept
     _print_findings(findings)
 
-    console.print(_summary(stats))
+    if file_config.source is not None:
+        console.print(f"\nConfig: {_safe(str(file_config.source))}")
+    console.print(_summary(stats) + _suppressed(filtered))
     if findings:
         console.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
         raise typer.Exit(EXIT_FINDINGS)
@@ -198,6 +213,16 @@ def _scan_history(
             "commit is reported as adding every file it contains.[/yellow]"
         )
     return result.findings, result.stats
+
+
+def _suppressed(filtered: FilterResult) -> str:
+    """Say how many findings the allowlist and inline markers removed."""
+    if not (filtered.suppressed_by_path or filtered.suppressed_inline):
+        return ""
+    return (
+        f"\n{filtered.suppressed_by_path} finding(s) suppressed by the path allowlist, "
+        f"{filtered.suppressed_inline} by inline secrety:ignore."
+    )
 
 
 def _summary(stats: ScanStats) -> str:

@@ -1,6 +1,11 @@
 """Tunable settings, validated once so detectors can trust them."""
 
-from dataclasses import dataclass
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from secrety.allowlist import Allowlist
 
 # Entropy can never exceed log2 of the alphabet size: 6 bits for base64
 # (64 symbols), 4 bits for hex (16 symbols).
@@ -43,3 +48,73 @@ class EntropyConfig:
             )
         if self.min_length < 1:
             raise ValueError(f"min length must be at least 1, got {self.min_length}")
+
+
+CONFIG_FILE_NAME = ".secrety.toml"
+_SECTIONS = {"allowlist": {"paths", "use_defaults"}}
+
+
+class ConfigError(ValueError):
+    """Raised when a ``.secrety.toml`` file is malformed."""
+
+
+@dataclass(frozen=True, slots=True)
+class FileConfig:
+    """Settings read from a ``.secrety.toml`` file.
+
+    Attributes:
+        allowlist: Path allowlist (defaults plus the file's ``paths``).
+        source: The file that was read, or ``None`` when there was none.
+    """
+
+    allowlist: Allowlist = field(default_factory=Allowlist)
+    source: Path | None = None
+
+
+def load_file_config(explicit: Path | None, scan_path: Path) -> FileConfig:
+    """Read ``explicit``, else ``.secrety.toml`` at the scan root, else defaults.
+
+    The scan root is ``scan_path`` for a folder, its parent for a single
+    file. A file is validated in full: an unknown key (a typo such as
+    ``path`` for ``paths``) is an error, never ignored.
+
+    Raises:
+        ConfigError: The file is not valid TOML or does not match the schema.
+    """
+    path = explicit
+    if path is None:
+        root = scan_path if scan_path.is_dir() else scan_path.parent
+        candidate = root / CONFIG_FILE_NAME
+        if not candidate.is_file():
+            return FileConfig()
+        path = candidate
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"{path}: cannot be read: {exc}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{path}: not valid TOML: {exc}") from exc
+    return FileConfig(allowlist=_parse_allowlist(data, path), source=path)
+
+
+def _parse_allowlist(data: dict[str, Any], path: Path) -> Allowlist:
+    """Validate the whole file and build its :class:`Allowlist`."""
+    for key, value in data.items():
+        if key not in _SECTIONS:
+            raise ConfigError(f"{path}: unknown key {key!r} (expected {sorted(_SECTIONS)})")
+        if not isinstance(value, dict):
+            raise ConfigError(f"{path}: [{key}] must be a table")
+        unknown = set(value) - _SECTIONS[key]
+        if unknown:
+            raise ConfigError(
+                f"{path}: unknown key {sorted(unknown)} in [{key}] "
+                f"(expected {sorted(_SECTIONS[key])})"
+            )
+    section = data.get("allowlist", {})
+    paths = section.get("paths", [])
+    if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
+        raise ConfigError(f"{path}: allowlist.paths must be a list of strings (globs)")
+    use_defaults = section.get("use_defaults", True)
+    if not isinstance(use_defaults, bool):
+        raise ConfigError(f"{path}: allowlist.use_defaults must be true or false")
+    return Allowlist(paths=tuple(paths), use_defaults=use_defaults)

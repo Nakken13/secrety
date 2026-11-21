@@ -247,3 +247,58 @@ def test_control_characters_from_the_repository_are_not_sent_to_the_terminal(
 def test_git_help_says_only_head_history_is_scanned() -> None:
     result = runner.invoke(app, ["scan", "--help"])
     assert "reachable from HEAD" in " ".join(result.output.replace("\u2502", " ").split())
+
+
+# --- allowlist and inline ignore -----------------------------------------
+
+
+def test_findings_in_allowed_paths_are_suppressed_and_counted(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "fixture.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "1 finding(s) suppressed by the path allowlist" in result.output
+
+
+def test_inline_ignore_suppresses_a_finding(tmp_path: Path) -> None:
+    (tmp_path / "app.env").write_text(
+        f"GH={fakes.GITHUB_TOKEN}  # secrety:ignore[github-token, high-entropy-base64]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "1 by inline secrety:ignore" in result.output
+
+
+def test_config_file_can_turn_default_allowlist_off(tmp_path: Path) -> None:
+    (tmp_path / ".secrety.toml").write_text("[allowlist]\nuse_defaults = false\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "fixture.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "tests/fixture.env:1:4" in result.output
+    assert "Config: " in result.output
+
+
+def test_explicit_config_option(tmp_path: Path) -> None:
+    config = tmp_path / "custom.toml"
+    config.write_text('[allowlist]\npaths = ["vendor/**"]\n', encoding="utf-8")
+    target = tmp_path / "repo"
+    (target / "vendor").mkdir(parents=True)
+    (target / "vendor" / "a.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    assert runner.invoke(app, ["scan", str(target)]).exit_code == 1
+    assert runner.invoke(app, ["scan", str(target), "--config", str(config)]).exit_code == 0
+
+
+def test_invalid_config_exits_two(tmp_path: Path) -> None:
+    (tmp_path / ".secrety.toml").write_text("[allowlist]\npath = []\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "unknown key" in result.output
+
+
+def test_git_scan_applies_the_allowlist(git_repo: GitRepo) -> None:
+    git_repo.commit("add fixture", **{"tests__fixture.env": f"GH={fakes.GITHUB_TOKEN}\n"})
+    result = runner.invoke(app, ["scan", str(git_repo.path), "--git"])
+    assert result.exit_code == 0
+    assert "1 finding(s) suppressed by the path allowlist" in result.output
