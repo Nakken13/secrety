@@ -15,7 +15,7 @@ Sequential: 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08. (03 and 05 are loosely
 - ~~`02-entropy-detection.md`~~
 - ~~`03-git-history-scan.md`~~
 - ~~`04-false-positive-reduction.md`~~
-- `05-outputs.md`
+- ~~`05-outputs.md`~~
 - `06-integration.md`
 - `07-evaluation.md`
 - `08-docs-release.md`
