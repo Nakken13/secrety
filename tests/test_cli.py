@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 import fakes
+from conftest import GitRepo
 from secrety import __version__
 from secrety.cli import app
 
@@ -170,3 +171,63 @@ def test_location_is_not_read_as_an_emoji_code(tmp_path: Path) -> None:
     (tmp_path / "a.env").write_text(text, encoding="utf-8")
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert "a.env:100:4" in result.output
+
+
+def test_git_scan_finds_a_secret_deleted_later(git_repo: GitRepo) -> None:
+    git_repo.commit("init", **{"README": "hello\n"})
+    leak = git_repo.commit("leak", **{"app__settings.env": f"A=1\nGH={fakes.GITHUB_TOKEN}\n"})
+    git_repo.commit("oops", **{"app__settings.env": "A=1\nGH=\n"})
+    # A folder scan of the working tree sees nothing...
+    assert runner.invoke(app, ["scan", str(git_repo.path)]).exit_code == 0
+    # ...the history scan finds it, at the commit that added it.
+    result = runner.invoke(app, ["scan", str(git_repo.path), "--git"])
+    assert result.exit_code == 1
+    assert f"{leak[:12]}:app/settings.env:2:4" in result.output
+    assert "removed from HEAD" in result.output
+    assert "Test Author <author@example.com>" in result.output
+    assert fakes.GITHUB_TOKEN not in result.output
+    assert "3 commit(s)" in result.output
+
+
+def test_git_scan_options_are_passed_on(git_repo: GitRepo) -> None:
+    git_repo.commit("leak", **{"a.env": f"GH={fakes.GITHUB_TOKEN}\n"})
+    git_repo.commit("later", **{"b.txt": "x\n"})
+    assert (
+        runner.invoke(app, ["scan", str(git_repo.path), "--git", "--max-commits", "1"]).exit_code
+        == 0
+    )
+    assert (
+        runner.invoke(app, ["scan", str(git_repo.path), "--git", "--since", "2024-01-02"]).exit_code
+        == 0
+    )
+    assert (
+        runner.invoke(app, ["scan", str(git_repo.path), "--git", "--since", "2023-12-31"]).exit_code
+        == 1
+    )
+
+
+def test_git_scan_of_a_folder_that_is_not_a_repository_exits_two(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(tmp_path), "--git"])
+    assert result.exit_code == 2
+    assert "not a Git repository" in result.output
+
+
+def test_git_scan_of_an_empty_repository_exits_two(git_repo: GitRepo) -> None:
+    result = runner.invoke(app, ["scan", str(git_repo.path), "--git"])
+    assert result.exit_code == 2
+    assert "no commits" in result.output
+
+
+def test_git_scan_warns_about_shallow_clones(git_repo: GitRepo, tmp_path: Path) -> None:
+    git_repo.commit("one", **{"a.txt": "1\n"})
+    git_repo.commit("two", **{"a.txt": "1\n2\n"})
+    clone = tmp_path / "clone"
+    git_repo.git("clone", "--quiet", "--depth=1", git_repo.path.as_uri(), str(clone))
+    result = runner.invoke(app, ["scan", str(clone), "--git"])
+    assert "shallow clone" in result.output
+
+
+def test_git_options_require_git(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(tmp_path), "--max-commits", "1"])
+    assert result.exit_code == 2
+    assert "--git" in result.output

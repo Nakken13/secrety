@@ -20,7 +20,8 @@ def scan(source: Source, detectors: Sequence[Detector]) -> ScanResult:
     """Run ``detectors`` on each file of ``source`` and collect the findings.
 
     Detectors only see text and a path; the commit a file comes from (Git
-    history source) is attached here, so no detector needs to know about Git.
+    history source), with its author and date, is attached here, so no
+    detector needs to know about Git.
     Findings from different detectors that flag the same place are merged
     (see :func:`merge_duplicates`). Files keep the source order and findings
     are sorted by position inside a file, so the same input always gives the
@@ -30,7 +31,9 @@ def scan(source: Source, detectors: Sequence[Detector]) -> ScanResult:
     for file in source:
         file_findings = [f for detector in detectors for f in detector.scan(file.text, file.path)]
         for finding in merge_duplicates(file_findings):
-            findings.append(replace(finding, commit=file.commit) if file.commit else finding)
+            if file.commit:
+                finding = replace(finding, commit=file.commit, author=file.author, date=file.date)
+            findings.append(finding)
     return ScanResult(findings=findings, stats=source.stats)
 
 

@@ -1,7 +1,9 @@
 """Command-line interface for secrety."""
 
+from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
@@ -14,7 +16,7 @@ from secrety.config import (
     DEFAULT_MIN_LENGTH,
     EntropyConfig,
 )
-from secrety.detectors import EntropyDetector, RegexDetector
+from secrety.detectors import Detector, EntropyDetector, RegexDetector
 from secrety.models import Finding
 from secrety.rules import load_rules
 from secrety.scanner import scan as run_scan
@@ -23,6 +25,7 @@ from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
 
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
+_DATE_FORMATS = ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]
 
 app = typer.Typer(
     name="secrety",
@@ -65,11 +68,16 @@ def _print_findings(findings: list[Finding]) -> None:
     """
     for f in findings:
         # Rule ids may come from a custom rules file: escaped like the rest.
-        also = ", ".join(rule_id for rule_id, _ in f.also_matched)
+        details = [f"confidence {f.confidence:.2f}"]
+        if f.also_matched:
+            details.append("also: " + ", ".join(rule_id for rule_id, _ in f.also_matched))
+        if f.author:
+            details.append(f"by {f.author}" + (f" on {f.date[:10]}" if f.date else ""))
+        if f.removed_later:
+            details.append("removed from HEAD, still in history")
         console.print(
             f"{escape(f.location)}  [bold]{escape(f.rule_id)}[/bold]  {escape(f.masked())}  "
-            f"[dim](confidence {f.confidence:.2f}"
-            f"{f'; also: {escape(also)}' if also else ''})[/dim]"
+            f"[dim]({escape('; '.join(details))})[/dim]"
         )
 
 
@@ -96,11 +104,28 @@ def scan(
     entropy_min_length: Annotated[
         int, typer.Option(help="Shortest token checked for entropy.")
     ] = DEFAULT_MIN_LENGTH,
+    git_history: Annotated[
+        bool,
+        typer.Option(
+            "--git",
+            help="Scan the lines added by every commit of the repository at PATH "
+            "instead of the files on disk (uncommitted changes are not scanned).",
+        ),
+    ] = False,
+    max_commits: Annotated[
+        int | None, typer.Option(min=1, help="With --git: scan only the N newest commits.")
+    ] = None,
+    since: Annotated[
+        datetime | None,
+        typer.Option(formats=_DATE_FORMATS, help="With --git: scan only commits after this date."),
+    ] = None,
 ) -> None:
     """Scan PATH for exposed secrets.
 
     Exit code: 0 if nothing is found, 1 if secrets are found, 2 on error.
     """
+    if not git_history and (max_commits is not None or since is not None):
+        _fail("--max-commits and --since need --git.")
     try:  # RuleError is a ValueError: one error path for rules and settings
         loaded_rules = load_rules(rules)
         entropy = EntropyConfig(
@@ -109,23 +134,67 @@ def scan(
             min_length=entropy_min_length,
         )
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {escape(str(exc))}")
-        raise typer.Exit(EXIT_ERROR) from exc
+        _fail(str(exc), exc)
     detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]
-    result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
-    _print_findings(result.findings)
+    if git_history:
+        findings, stats = _scan_history(path, detectors, max_file_size, max_commits, since)
+    else:
+        result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
+        findings, stats = result.findings, result.stats
+    _print_findings(findings)
 
-    console.print(_summary(result.stats))
-    if result.findings:
-        console.print(f"[red bold]{len(result.findings)} potential secret(s) found.[/red bold]")
+    console.print(_summary(stats))
+    if findings:
+        console.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
         raise typer.Exit(EXIT_FINDINGS)
     console.print("[green]No secret found.[/green]")
 
 
+def _fail(message: str, cause: BaseException | None = None) -> NoReturn:
+    """Print ``message`` as an error and exit with :data:`EXIT_ERROR`."""
+    console.print(f"[red]Error:[/red] {escape(message)}")
+    raise typer.Exit(EXIT_ERROR) from cause
+
+
+def _scan_history(
+    path: Path,
+    detectors: Sequence[Detector],
+    max_file_size: int,
+    max_commits: int | None,
+    since: datetime | None,
+) -> tuple[list[Finding], ScanStats]:
+    """Scan the Git history at ``path``, marking secrets no longer in ``HEAD``."""
+    # Imported here: GitPython fails at import time when git is not installed,
+    # which must not break a plain folder scan.
+    try:
+        import git
+
+        from secrety.sources.git import GitSource
+    except ImportError as exc:
+        _fail(f"--git needs GitPython and the git executable: {exc}", exc)
+    source = GitSource(path, max_commits=max_commits, since=since, max_file_size=max_file_size)
+    try:
+        findings = source.mark_removed(run_scan(source, detectors).findings)
+        shallow = source.is_shallow()
+    except (ValueError, git.GitError) as exc:
+        _fail(str(exc), exc)
+    if shallow:
+        console.print(
+            "[yellow]Warning: shallow clone. Older history is missing, and the oldest "
+            "commit is reported as adding every file it contains.[/yellow]"
+        )
+    return findings, source.stats
+
+
 def _summary(stats: ScanStats) -> str:
     """Describe what was scanned and everything that was skipped."""
+    scanned = (
+        f"{stats.scanned} file change(s) in {stats.commits} commit(s)"
+        if stats.commits
+        else f"{stats.scanned} file(s)"
+    )
     summary = (
-        f"\n{stats.scanned} file(s) scanned, {stats.skipped_binary} binary and "
+        f"\n{scanned} scanned, {stats.skipped_binary} binary and "
         f"{stats.skipped_large} large file(s) skipped."
     )
     if stats.unreadable:

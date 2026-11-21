@@ -34,6 +34,11 @@ class Finding:
         method: Detection method that produced this finding.
         confidence: Score in ``[0, 1]``; higher means more likely a real secret.
         commit: Commit SHA when the finding comes from Git history, else ``None``.
+        author: ``Name <email>`` of the commit author (Git history only).
+        date: Author date of the commit, ISO 8601 (Git history only).
+        removed_later: For Git history, ``True`` when the secret no longer
+            appears anywhere in ``HEAD`` (it lives only in history), ``False``
+            when it is still there; ``None`` when not checked.
         also_matched: ``(rule_id, method)`` of the other findings merged into
             this one because they flagged the same place (see
             :func:`secrety.scanner.merge_duplicates`).
@@ -49,6 +54,9 @@ class Finding:
     method: DetectionMethod
     confidence: float
     commit: str | None = None
+    author: str | None = None
+    date: str | None = None
+    removed_later: bool | None = None
     also_matched: tuple[tuple[str, DetectionMethod], ...] = ()
 
     def __post_init__(self) -> None:

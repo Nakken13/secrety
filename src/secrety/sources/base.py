@@ -14,11 +14,15 @@ class SourceFile:
         text: Decoded content (invalid bytes replaced by U+FFFD).
         commit: SHA of the commit this version comes from (Git history
             source), or ``None`` for a file on disk.
+        author: ``Name <email>`` of the commit author (Git history only).
+        date: Author date of the commit, ISO 8601 (Git history only).
     """
 
     path: str
     text: str
     commit: str | None = None
+    author: str | None = None
+    date: str | None = None
 
 
 @dataclass(slots=True)
@@ -26,6 +30,7 @@ class ScanStats:
     """Counters reported at the end of a scan, so nothing is skipped silently."""
 
     scanned: int = 0
+    commits: int = 0
     skipped_binary: int = 0
     skipped_large: int = 0
     unreadable: int = 0

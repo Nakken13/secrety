@@ -1,0 +1,199 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+import fakes
+from conftest import GitRepo
+from secrety.detectors import RegexDetector
+from secrety.rules import load_rules
+from secrety.scanner import scan
+from secrety.sources.git import GitSource
+from test_models import make_finding
+
+
+def files_of(repo: GitRepo, **options: object) -> list[tuple[str, str, str]]:
+    """``(short sha, path, text)`` of every file version the source yields."""
+    return [(f.commit[:7], f.path, f.text) for f in GitSource(repo.path, **options)]  # type: ignore[index,arg-type]
+
+
+def test_yields_only_the_lines_added_by_each_commit(git_repo: GitRepo) -> None:
+    first = git_repo.commit("one", **{"a.txt": "alpha\nbeta\n"})
+    second = git_repo.commit("two", **{"a.txt": "alpha\nNEW\nbeta\n"})
+    assert (
+        files_of(git_repo)
+        == [
+            (second[:7], "a.txt", "\nNEW"),  # newest first, line 2 kept at line 2
+            (first[:7], "a.txt", "alpha\nbeta"),
+        ]
+    )
+
+
+def test_attaches_author_and_date(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.txt": "x\n"})
+    (file,) = GitSource(git_repo.path)
+    assert file.author == "Test Author <author@example.com>"
+    assert datetime.fromisoformat(file.date) == datetime(2024, 1, 1, 12, tzinfo=UTC)  # type: ignore[arg-type]
+
+
+def test_findings_point_at_the_line_of_the_file_in_that_commit(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"cfg.env": "A=1\nB=2\nC=3\n"})
+    sha = git_repo.commit("leak", **{"cfg.env": f"A=1\nB=2\nTOKEN={fakes.GITHUB_TOKEN}\nC=3\n"})
+    result = scan(GitSource(git_repo.path), [RegexDetector(load_rules())])
+    (finding,) = result.findings
+    assert (finding.commit, finding.path, finding.line) == (sha, "cfg.env", 3)
+    assert finding.author == "Test Author <author@example.com>"
+    assert datetime.fromisoformat(finding.date) == datetime(2024, 1, 2, 12, tzinfo=UTC)  # type: ignore[arg-type]
+    shown = git_repo.git("show", f"{sha}:cfg.env").split("\n")
+    assert fakes.GITHUB_TOKEN in shown[finding.line - 1]
+    assert result.stats.commits == 2
+
+
+def test_deleted_lines_and_deleted_files_yield_nothing(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.txt": "keep\ndrop\n", "b.txt": "gone\n"})
+    git_repo.write("a.txt", "keep\n")
+    (git_repo.path / "b.txt").unlink()
+    git_repo.commit("two")
+    assert [path for _, path, _ in files_of(git_repo)] == ["a.txt", "b.txt"]  # commit one only
+
+
+def test_paths_in_subfolders_with_spaces_and_non_ascii(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"dir__my file é.txt": "x\n"})
+    assert sorted(path for _, path, _ in files_of(git_repo)) == ["dir/my file é.txt"]
+
+
+def test_rename_without_change_is_not_rescanned(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.txt": "content\n"})
+    git_repo.git("mv", "a.txt", "b.txt")
+    git_repo.commit("rename")
+    assert [path for _, path, _ in files_of(git_repo)] == ["a.txt"]
+
+
+def test_file_without_trailing_newline(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.txt": "no newline"})
+    assert files_of(git_repo)[0][2] == "no newline"
+
+
+def test_not_a_repository_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not a Git repository"):
+        list(GitSource(tmp_path))
+
+
+def test_repository_without_commits_raises(git_repo: GitRepo) -> None:
+    with pytest.raises(ValueError, match="no commits"):
+        list(GitSource(git_repo.path))
+
+
+def scan_history(repo: GitRepo) -> list:
+    source = GitSource(repo.path)
+    findings = scan(source, [RegexDetector(load_rules())]).findings
+    return source.mark_removed(findings)
+
+
+def test_secret_deleted_later_is_marked_removed(git_repo: GitRepo) -> None:
+    leak = git_repo.commit("leak", **{"cfg.env": f"TOKEN={fakes.GITHUB_TOKEN}\n"})
+    git_repo.commit("cleanup", **{"cfg.env": "TOKEN=\n"})
+    (finding,) = scan_history(git_repo)
+    assert (finding.commit, finding.removed_later) == (leak, True)
+
+
+def test_secret_still_in_head_is_not_marked_removed(git_repo: GitRepo) -> None:
+    git_repo.commit("leak", **{"cfg.env": f"TOKEN={fakes.GITHUB_TOKEN}\n"})
+    git_repo.commit("other", **{"README": "hello\n"})
+    (finding,) = scan_history(git_repo)
+    assert finding.removed_later is False
+
+
+def test_secret_moved_to_another_file_is_not_marked_removed(git_repo: GitRepo) -> None:
+    git_repo.commit("leak", **{"a.env": f"TOKEN={fakes.GITHUB_TOKEN}\n"})
+    (git_repo.path / "a.env").unlink()
+    git_repo.commit("move", **{"b.env": f"KEY={fakes.GITHUB_TOKEN}\n"})
+    assert [f.removed_later for f in scan_history(git_repo)] == [False, False]
+
+
+def test_secret_inside_a_longer_secret_in_head_is_not_removed(git_repo: GitRepo) -> None:
+    # git grep -o prints the longest match only, so "FAKEshort" is never printed.
+    git_repo.commit("one", **{"a.env": "K=FAKEshortFAKElonger\n"})
+    short = make_finding(commit="0" * 40, secret="FAKEshort", line_content="K=FAKEshort")
+    long = make_finding(commit="0" * 40, secret="FAKEshortFAKElonger", line_content="K=")
+    marked = GitSource(git_repo.path).mark_removed([short, long])
+    assert [f.removed_later for f in marked] == [False, False]
+
+
+def test_filesystem_findings_are_left_unchecked(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.txt": "x\n"})
+    finding = make_finding()
+    assert GitSource(git_repo.path).mark_removed([finding]) == [finding]
+
+
+def test_clean_merge_reports_nothing_new(git_repo: GitRepo) -> None:
+    git_repo.commit("base", **{"a.txt": "a\nb\n"})
+    git_repo.git("checkout", "--quiet", "-b", "feature")
+    branch = git_repo.commit("feature", **{"a.txt": f"a\nT={fakes.GITHUB_TOKEN}\nb\n"})
+    git_repo.git("checkout", "--quiet", "main")
+    git_repo.commit("main", **{"c.txt": "c\n"})
+    git_repo.git("merge", "--quiet", "--no-edit", "feature")
+    findings = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert [f.commit for f in findings] == [branch]
+
+
+def test_lines_added_while_resolving_a_merge_are_reported(git_repo: GitRepo) -> None:
+    git_repo.commit("base", **{"a.txt": "a\n"})
+    git_repo.git("checkout", "--quiet", "-b", "feature")
+    git_repo.commit("feature", **{"b.txt": "b\n"})
+    git_repo.git("checkout", "--quiet", "main")
+    git_repo.commit("main", **{"c.txt": "c\n"})
+    git_repo.git("merge", "--quiet", "--no-commit", "feature")
+    git_repo.write("b.txt", f"b\nT={fakes.GITHUB_TOKEN}\n")
+    evil = git_repo.commit("evil merge")
+    findings = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert [(f.commit, f.path, f.line) for f in findings] == [(evil, "b.txt", 2)]
+
+
+def test_binary_files_are_skipped_and_counted(git_repo: GitRepo) -> None:
+    git_repo.commit(
+        "one", **{"blob.bin": b"\x00\x01" + fakes.GITHUB_TOKEN.encode(), "a.txt": "x\n"}
+    )
+    source = GitSource(git_repo.path)
+    assert [f.path for f in source] == ["a.txt"]
+    assert (source.stats.scanned, source.stats.skipped_binary) == (1, 1)
+
+
+def test_file_versions_adding_more_than_max_size_are_skipped(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"big.txt": "x" * 50 + "\n", "small.txt": "y\n"})
+    source = GitSource(git_repo.path, max_file_size=20)
+    assert [f.path for f in source] == ["small.txt"]
+    assert source.stats.skipped_large == 1
+
+
+def test_shallow_clone_is_scanned_and_flagged(git_repo: GitRepo, tmp_path: Path) -> None:
+    git_repo.commit("one", **{"a.txt": "old\n"})
+    git_repo.commit("two", **{"a.txt": "old\nnew\n"})
+    clone = tmp_path / "clone"
+    git_repo.git("clone", "--quiet", "--depth=1", git_repo.path.as_uri(), str(clone))
+    source = GitSource(clone)
+    assert [f.text for f in source] == ["old\nnew"]  # the boundary commit adds everything
+    assert source.is_shallow()
+    assert not GitSource(git_repo.path).is_shallow()
+
+
+def test_max_commits_keeps_the_newest(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.txt": "1\n"})
+    git_repo.commit("two", **{"b.txt": "2\n"})
+    newest = git_repo.commit("three", **{"c.txt": "3\n"})
+    source = GitSource(git_repo.path, max_commits=1)
+    assert [f.commit for f in source] == [newest]
+    assert source.stats.commits == 1
+
+
+def test_since_skips_older_commits(git_repo: GitRepo) -> None:
+    git_repo.commit("day 1", **{"a.txt": "1\n"})
+    git_repo.commit("day 2", **{"b.txt": "2\n"})
+    git_repo.commit("day 3", **{"c.txt": "3\n"})
+    since = datetime(2024, 1, 2, tzinfo=UTC)
+    assert [f.path for f in GitSource(git_repo.path, since=since)] == ["c.txt", "b.txt"]
+
+
+def test_subfolder_limits_history_to_it(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"src__a.txt": "a\n", "doc__b.txt": "b\n"})
+    assert [f.path for f in GitSource(git_repo.path / "src")] == ["src/a.txt"]
