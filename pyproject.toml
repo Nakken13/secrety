@@ -38,7 +38,7 @@ dev = [
 ]
 
 [project.scripts]
-secrety = "secrety.cli:app"
+secrety = "secrety.cli:app"  # secrety:ignore[generic-password-assignment]
 
 [project.urls]
 Homepage = "https://github.com/Nakken13/secrety"

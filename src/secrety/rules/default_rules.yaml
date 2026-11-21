@@ -99,7 +99,7 @@ rules:
     keywords: [putty-user-key-file]
 
   - id: url-credentials
-    description: Password embedded in a URL (scheme://user:password@host)
+    description: Password embedded in a URL (scheme://user:password@host)  # secrety:ignore[url-credentials]
     regex: '(?<![a-zA-Z0-9+.\-])[a-zA-Z][a-zA-Z0-9+.\-]{0,31}://[^\s:/@''"]{1,256}:([^\s@/''"$<{%][^\s@/''"]{0,255})@[^\s''"/]{1,256}'
     secret_group: 1
     confidence: 0.75
