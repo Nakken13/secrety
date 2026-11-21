@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from enum import StrEnum
 
 from secrety.config import MAX_BASE64_ENTROPY, MAX_HEX_ENTROPY, EntropyConfig
-from secrety.detectors.regex import iter_lines
+from secrety.detectors.base import iter_lines
 from secrety.models import DetectionMethod, Finding
 
 # Standard and URL-safe base64 alphabets; ``=`` only as trailing padding.

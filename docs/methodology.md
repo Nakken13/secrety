@@ -1,11 +1,10 @@
 # Detection methodology
 
-secrety runs three detectors on every file, then merges what they report.
+secrety runs two detectors on every file, then merges what they report.
 
 | Detector | Finds | Method | Confidence |
 |---|---|---|---|
-| Regex rules (`rules/default_rules.yaml`) | known formats: AWS, GitHub, Stripe, JWT, private keys... | `regex` | per rule, 0.4 to 0.95 |
-| Unquoted assignments | `DB_PASSWORD=...`, `password: ...` in config files | `regex` | 0.4 |
+| Regex rules (`rules/default_rules.yaml`) | known formats (AWS, GitHub, Stripe, JWT, private keys...) and generic password assignments | `regex` | per rule, 0.4 to 0.95 |
 | Entropy | random-looking tokens with no known format | `entropy` | 0.3 to 0.6 |
 
 ## Shannon entropy
@@ -61,22 +60,31 @@ threshold proportionate to its maximum:
 `--entropy-min-length` sets the shortest token. The defaults are the usual
 starting points (TruffleHog, detect-secrets). Task 07 tunes them on a
 labelled corpus. Confidence grows linearly from 0.3 at the threshold to 0.6 at
-the charset maximum, so entropy findings stay below most regex rules. A known
-format is stronger evidence than randomness.
+the charset maximum, so entropy findings stay below most regex rules.
+
+This confidence is not comparable across charsets. Hex reaches its 4-bit
+ceiling easily, so a random hex digest scores 0.4-0.55. A random base64 token
+of 24-40 characters scores only 0.3-0.35, because the length bound keeps it far
+from 6 bits. Calibrated scores come from the classifier (task 04).
 
 ## Unquoted assignments in config files
 
 The `generic-password-assignment` regex rule only accepts quoted values. In
 code, an unquoted value is an identifier or a call (`password =
 get_password()`). In config files (`.env*`, `.yml`/`.yaml`, `.ini`, `.cfg`,
-`.conf`, `.properties`), values are plain text. A dedicated detector flags
-`KEY=value` and `key: value` lines there when:
+`.conf`, `.properties`), values are plain text. The
+`generic-password-unquoted` rule flags `KEY=value` and `key: value` lines
+there. It is an ordinary YAML rule: the optional `paths` field (globs on the
+file name) limits it to those files, so a custom `--rules` file can tune or
+drop it. It matches when:
 
 - the line starts with the key (after indentation, an optional YAML list
   marker `- ` and an optional `export`);
 - the key contains `password`, `passwd`, `pwd`, `secret`, `api_key`,
-  `access_token` or `auth_token`;
-- the value is 8 to 256 non-space characters;
+  `access_token` or `auth_token`, with `_`, `-` or nothing in the middle
+  (`x-api-key`, `apikey`);
+- the value has at least 8 non-space characters; only the first 256 are
+  reported;
 - the value does not start with `$ < { %`, which mark references and templates
   (`${VAR}`, `<your-password>`, `{{ var }}`, `%(var)s`).
 
@@ -92,23 +100,25 @@ line whose spans overlap are grouped. Overlap is transitive: one JWT regex
 match overlaps three entropy tokens, because `.` splits them. Each group keeps
 one finding:
 
-1. the highest confidence;
-2. on a tie, a regex finding over an entropy one;
+1. a regex finding, if the group has one, whatever its confidence;
+2. then the highest confidence;
 3. then the earliest column.
 
-The other findings are recorded in `Finding.also_matched`, and
-`Finding.methods` lists every method that fired.
+Regex comes first for two reasons. A known format is stronger evidence than
+randomness. And letting confidence decide would make the result depend on the
+entropy threshold: `password = "<hex>"` would be reported as
+`high-entropy-hex` at one threshold and `generic-password-assignment` at
+another. The fingerprint hashes the rule id, so it would flip too. Regex also
+wins when the entropy token is only a fragment of the value: `!` and `@` are
+not base64, so they cut the value into several tokens.
 
-Entropy can win a group. `password = "<32 hex digits>"` is reported as
-`high-entropy-hex` (about 0.6) rather than `generic-password-assignment`
-(0.4), and the generic rule appears in `also_matched`. When the value holds
-characters outside base64 (`!`, `@`...), the entropy finding covers only part
-of the value, so the reported `secret` is that fragment.
+The other findings are recorded in `Finding.also_matched`, listed as `also:`
+in the terminal output. `Finding.methods` lists every method that fired.
 
 ## Known weaknesses
 
 - **Short secrets are invisible to entropy.** See the length bound above.
-  Passwords are left to regex rules and to the unquoted-assignment detector.
+  Passwords are left to the regex rules, quoted and unquoted.
 - **Public base64 data.** Certificate bundles (`cacert.pem`), embedded images
   and lock-file integrity hashes are high entropy and not secret. Scanning
   pip's own package gives about 2,550 findings from `cacert.pem` alone. Task 04
@@ -120,7 +130,16 @@ of the value, so the reported `secret` is that fragment.
 - **Character frequency only.** `H` ignores order, so `abcdabcd...` scores like
   a random string of the same letters.
 - **No upper length.** A one-line data URI or an embedded notebook image is a
-  single huge token, so it gives one finding whose masked value is just as long.
+  single huge token, so it gives one finding. The masked value is capped at 120
+  asterisks, so it does not flood the terminal.
+- **Fragments.** With no regex finding to take over, an entropy finding on a
+  value cut by `!` or `.` reports only one piece. The other pieces stay in the
+  line context that the fingerprint hashes. Short pieces could in principle be
+  brute-forced from a published fingerprint.
+- **Fingerprint collisions.** Two different tokens with the same surrounding
+  text in one file (`k = "<token>"`) get the same fingerprint, because the
+  fingerprint leaves the secret and the line number out on purpose. This
+  matters for baselines.
 - **Line by line.** A secret split across lines (a multi-line PEM body, a
   string concatenation) is seen in pieces, or missed.
 - **Unquoted detection depends on file names.** A config file with an unusual

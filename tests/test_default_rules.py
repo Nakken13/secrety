@@ -59,6 +59,20 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
         (f"SECRET_KEY = '{fakes.GENERIC_PASSWORD}'", fakes.GENERIC_PASSWORD),
         (f'password := "{fakes.GENERIC_PASSWORD}"', fakes.GENERIC_PASSWORD),  # Go
     ],
+    # Checked against a ".env" path (see first_secret): the rule is limited to
+    # config files, where values are literals and not identifiers or calls.
+    "generic-password-unquoted": [
+        (f"DB_PASSWORD={fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),
+        (f"export API_KEY={fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),
+        (f"SECRET_KEY = {fakes.ENV_PASSWORD}  # rotated monthly", fakes.ENV_PASSWORD),
+        (f"  password: {fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),
+        (f"auth_token : {fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),
+        (f"      - DB_PASSWORD={fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),  # compose list
+        (f"  - password: {fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),
+        (f"x-api-key: {fakes.ENV_PASSWORD}", fakes.ENV_PASSWORD),
+        # Longer than 256 characters: the first 256 are reported, not nothing.
+        ("API_KEY=" + fakes.pad("FAKE", 300), fakes.pad("FAKE", 256)),
+    ],
 }
 
 NEGATIVE: dict[str, list[str]] = {
@@ -90,13 +104,46 @@ NEGATIVE: dict[str, list[str]] = {
         "pwd = os.getcwd()",
         "password_hint = None",
     ],
+    "generic-password-unquoted": [
+        "password=${DB_PASSWORD}",
+        "password: <your-password>",
+        "password: {{ vault_password }}",
+        "password: %(db_password)s",
+        "password: short",
+        'password: "quoted-is-left-to-the-regex-rule"',
+        "# password: commented-out-line",
+        "password_policy_url: x",
+    ],
 }
 
 
 def first_secret(rule: Rule, line: str) -> str | None:
     """Return the secret the real detector reports for ``rule`` on ``line``."""
-    finding = next(iter(RegexDetector([rule]).scan(line, "case.txt")), None)
+    finding = next(iter(RegexDetector([rule]).scan(line, ".env")), None)
     return finding.secret if finding else None
+
+
+@pytest.mark.parametrize(
+    ("path", "flagged"),
+    [
+        (".env", True),
+        (".env.production", True),
+        ("conf/app.ini", True),
+        ("deploy.yml", True),
+        ("k8s/values.yaml", True),
+        ("a.properties", True),
+        ("setup.cfg", True),
+        ("nginx.conf", True),
+        ("app.py", False),
+        ("main.js", False),
+        ("README.md", False),
+        ("environment.py", False),
+    ],
+)
+def test_unquoted_rule_only_runs_on_config_files(path: str, flagged: bool) -> None:
+    # In code an unquoted value is an identifier or a call, not a literal.
+    detector = RegexDetector([RULES["generic-password-unquoted"]])
+    assert bool(list(detector.scan(f"password = {fakes.ENV_PASSWORD}", path))) is flagged
 
 
 def test_every_rule_has_positive_and_negative_cases() -> None:

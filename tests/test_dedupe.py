@@ -50,10 +50,26 @@ def test_overlap_is_transitive() -> None:
     assert len(kept.also_matched) == 3
 
 
-def test_tie_goes_to_regex_then_earliest_column() -> None:
-    entropy = _finding("high-entropy-base64", 5, "E" * 30, 0.6, DetectionMethod.ENTROPY)
-    regex = _finding("jwt", 8, "R" * 30, 0.6)
-    assert merge_duplicates([entropy, regex])[0].rule_id == "jwt"
+def test_regex_beats_a_more_confident_entropy_finding() -> None:
+    # Otherwise the reported rule (and the fingerprint) would flip with the
+    # entropy threshold: a known format beats a statistical guess.
+    generic = _finding("generic-password-assignment", 10, "S" * 40, 0.4)
+    entropy = _finding("high-entropy-hex", 10, "S" * 40, 0.6, DetectionMethod.ENTROPY)
+    [kept] = merge_duplicates([entropy, generic])
+    assert kept.rule_id == "generic-password-assignment"
+
+
+def test_entropy_fragment_never_replaces_the_full_regex_value() -> None:
+    # "!" is not base64, so entropy only sees the part before it. Reporting
+    # that fragment would leave the rest of the secret in the fingerprint.
+    full = "Q" * 30 + "!x9Qa"
+    generic = _finding("generic-password-assignment", 10, full, 0.4)
+    fragment = _finding("high-entropy-base64", 10, "Q" * 30, 0.55, DetectionMethod.ENTROPY)
+    [kept] = merge_duplicates([fragment, generic])
+    assert kept.secret == full
+
+
+def test_tie_goes_to_earliest_column() -> None:
     first = _finding("rule-a", 8, "A" * 30, 0.6)
     second = _finding("rule-b", 5, "B" * 30, 0.6)
     assert merge_duplicates([first, second])[0].rule_id == "rule-b"

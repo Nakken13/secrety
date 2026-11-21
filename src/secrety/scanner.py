@@ -39,8 +39,8 @@ def merge_duplicates(findings: Sequence[Finding]) -> list[Finding]:
 
     Overlap is transitive: a JWT matched by one regex but split into three
     entropy tokens (``.`` is not base64) forms a single group. Each group
-    keeps one finding, the most confident; ties go to regex rules (a known
-    format beats a statistical guess), then to the earliest column. The others
+    keeps one finding: a regex one if there is any (a known format beats a
+    statistical guess), then the most confident, then the earliest column. The others
     are recorded in :attr:`~secrety.models.Finding.also_matched`.
 
     Returns:
@@ -64,7 +64,9 @@ def _keep_best(group: list[Finding]) -> Finding:
     """Return the winner of ``group`` with the losers recorded on it."""
     if len(group) == 1:
         return group[0]
+    # Regex first whatever the confidence: entropy confidence moves with the
+    # threshold, and an entropy token may be only a fragment of the value.
     # ``group`` is sorted by column and min() keeps the first of equal keys.
-    best = min(group, key=lambda f: (-f.confidence, f.method is not DetectionMethod.REGEX))
+    best = min(group, key=lambda f: (f.method is not DetectionMethod.REGEX, -f.confidence))
     others = tuple((f.rule_id, f.method) for f in group if f is not best)
     return replace(best, also_matched=best.also_matched + others)

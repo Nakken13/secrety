@@ -1,7 +1,7 @@
 # 02 Entropy detection
 
 Shannon entropy over base64/hex candidate tokens. Depends on 01.
-Zone : `src/secrety/detectors/`, `src/secrety/config.py`, `src/secrety/cli.py`, `src/secrety/scanner.py`, `src/secrety/models.py`, `docs/methodology.md`, `tests/`
+Zone : `src/secrety/detectors/`, `src/secrety/rules/`, `src/secrety/config.py`, `src/secrety/cli.py`, `src/secrety/scanner.py`, `src/secrety/models.py`, `docs/methodology.md`, `tests/`
 
 - [x] Tokenizer extracting base64 and hex candidates (min length)
 - [x] Shannon entropy function; per-charset thresholds (starting points base64 4.5, hex 3.0, tuned in task 07) + tests with known values

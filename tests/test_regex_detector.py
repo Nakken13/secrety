@@ -100,3 +100,12 @@ def test_long_lines_are_scanned_by_default() -> None:
     line = "x " * 100_000 + fakes.GOOGLE_API_KEY
     (finding,) = RegexDetector(load_rules()).scan(line, "bundle.min.js")
     assert finding.rule_id == "google-api-key"
+
+
+@pytest.mark.parametrize(
+    ("path", "flagged"),
+    [("app.env", True), ("deploy/prod.ENV", True), ("app.py", False), ("env/app.py", False)],
+)
+def test_rule_with_paths_only_runs_on_matching_file_names(path: str, flagged: bool) -> None:
+    rules = parse_rules("rules:\n  - {id: r, description: R, regex: 'abc', paths: ['*.env']}\n")
+    assert bool(list(RegexDetector(rules).scan("abc", path))) is flagged

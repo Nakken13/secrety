@@ -107,3 +107,20 @@ def test_required_fields_must_be_strings(field: str) -> None:
     yaml_text = "rules:\n  - {" + ", ".join(f"{k}: {v}" for k, v in raw.items()) + "}\n"
     with pytest.raises(RuleError, match=field):
         parse_rules(yaml_text)
+
+
+def test_paths_are_parsed_lowercase() -> None:
+    text = "rules:\n  - {id: a, description: A, regex: 'abc', paths: ['*.ENV', '.env*']}\n"
+    (rule,) = parse_rules(text)
+    assert rule.paths == ("*.env", ".env*")
+
+
+def test_paths_default_to_every_file() -> None:
+    (rule,) = parse_rules("rules:\n  - {id: a, description: A, regex: 'abc'}\n")
+    assert rule.paths == ()
+
+
+@pytest.mark.parametrize("paths", ["'*.env'", "[1]", "['']"])
+def test_invalid_paths_are_rejected(paths: str) -> None:
+    with pytest.raises(RuleError, match="paths"):
+        parse_rules(f"rules:\n  - {{id: a, description: A, regex: 'abc', paths: {paths}}}\n")

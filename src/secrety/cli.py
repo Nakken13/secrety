@@ -16,7 +16,7 @@ from secrety.config import (
     MAX_HEX_ENTROPY,
     EntropyConfig,
 )
-from secrety.detectors import EntropyDetector, RegexDetector, UnquotedAssignmentDetector
+from secrety.detectors import EntropyDetector, RegexDetector
 from secrety.models import Finding
 from secrety.rules import RuleError, load_rules
 from secrety.scanner import scan as run_scan
@@ -66,9 +66,12 @@ def _print_findings(findings: list[Finding]) -> None:
     escaped: a file named ``[link=...]x`` must not be read as Rich markup.
     """
     for f in findings:
+        # Rule ids may come from a custom rules file: escaped like the rest.
+        also = ", ".join(rule_id for rule_id, _ in f.also_matched)
         console.print(
             f"{escape(f.location)}  [bold]{escape(f.rule_id)}[/bold]  {escape(f.masked())}  "
-            f"[dim](confidence {f.confidence:.2f})[/dim]"
+            f"[dim](confidence {f.confidence:.2f}"
+            f"{f'; also: {escape(also)}' if also else ''})[/dim]"
         )
 
 
@@ -124,11 +127,7 @@ def scan(
     except ValueError as exc:  # a threshold of exactly 0, which typer lets through
         console.print(f"[red]Error:[/red] {escape(str(exc))}")
         raise typer.Exit(EXIT_ERROR) from exc
-    detectors = [
-        RegexDetector(loaded_rules),
-        UnquotedAssignmentDetector(),
-        EntropyDetector(entropy),
-    ]
+    detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]
     result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
     _print_findings(result.findings)
 

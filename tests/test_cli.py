@@ -124,6 +124,7 @@ def test_scan_merges_regex_and_entropy_findings(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert "1 potential secret(s) found" in result.output
     assert "github-token" in result.output
+    assert "also: high-entropy-base64" in result.output
 
 
 def test_entropy_options_are_passed_to_the_detector(tmp_path: Path) -> None:
@@ -132,6 +133,14 @@ def test_entropy_options_are_passed_to_the_detector(tmp_path: Path) -> None:
     assert runner.invoke(app, ["scan", str(tmp_path), *strict]).exit_code == 0
     long_only = ["--entropy-min-length", "60"]
     assert runner.invoke(app, ["scan", str(tmp_path), *long_only]).exit_code == 0
+
+
+def test_entropy_hex_option_is_passed_to_the_detector(tmp_path: Path) -> None:
+    digest = fakes.HIGH_ENTROPY_HEX[8:16] * 4  # "89abcdef" x4: entropy exactly 3.0
+    (tmp_path / "app.py").write_text(f"digest = {digest}\n", encoding="utf-8")
+    assert runner.invoke(app, ["scan", str(tmp_path)]).exit_code == 1
+    option = ["--entropy-hex-threshold", "3.5"]
+    assert runner.invoke(app, ["scan", str(tmp_path), *option]).exit_code == 0
 
 
 @pytest.mark.parametrize(

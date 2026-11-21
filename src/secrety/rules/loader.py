@@ -10,6 +10,7 @@ A rules file looks like::
         secret_group: 1      # capture group holding the secret (0 = whole match)
         confidence: 0.95     # prior probability that a match is a real secret
         keywords: [ghp_]     # cheap pre-filter: skip lines without any keyword
+        paths: ['*.env']     # optional: only files whose name matches a glob
 
 Every problem is reported as a :class:`RuleError` naming the file and the
 rule, so that a typo in a custom rule never fails silently.
@@ -29,7 +30,7 @@ DEFAULT_RULES_RESOURCE = "default_rules.yaml"
 DEFAULT_CONFIDENCE = 0.5
 SUPPORTED_VERSION = 1
 _REQUIRED = ("id", "description", "regex")
-_OPTIONAL = ("secret_group", "confidence", "keywords")
+_OPTIONAL = ("secret_group", "confidence", "keywords", "paths")
 
 
 class RuleError(ValueError):
@@ -47,6 +48,7 @@ class Rule:
         secret_group: Index of the capture group holding the secret.
         confidence: Prior confidence in ``[0, 1]`` attached to every match.
         keywords: Lowercase substrings; a line containing none is skipped.
+        paths: Lowercase globs on the file name (``*.env``); empty = every file.
     """
 
     id: str
@@ -55,6 +57,7 @@ class Rule:
     secret_group: int = 0
     confidence: float = DEFAULT_CONFIDENCE
     keywords: tuple[str, ...] = ()
+    paths: tuple[str, ...] = ()
 
 
 def _is_number(value: Any, *, integer: bool = False) -> bool:
@@ -98,6 +101,10 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
     if not isinstance(keywords, list) or not all(isinstance(k, str) and k for k in keywords):
         raise RuleError(f"{where}: keywords must be a list of non-empty strings")
 
+    paths = raw.get("paths") or []
+    if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
+        raise RuleError(f"{where}: paths must be a list of non-empty glob strings")
+
     return Rule(
         id=raw["id"],
         description=raw["description"],
@@ -105,6 +112,7 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
         secret_group=secret_group,
         confidence=float(confidence),
         keywords=tuple(k.lower() for k in keywords),
+        paths=tuple(p.lower() for p in paths),
     )
 
 

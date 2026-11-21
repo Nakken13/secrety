@@ -32,6 +32,12 @@ def test_masked_never_reveals_more_than_a_quarter(length: int) -> None:
     assert masked.count("s") <= length // 4
 
 
+def test_masked_huge_secret_stays_short() -> None:
+    # A one-line data URI can be a single 900 kB token.
+    masked = make_finding(secret="A" * 4 + "x" * 900_000 + "B" * 4).masked()
+    assert masked == "AAAA" + "*" * 120 + "BBBB"
+
+
 @pytest.mark.parametrize("length", [1, 8, 9, 12, 19])
 def test_masked_short_secret_is_fully_hidden(length: int) -> None:
     # Short values are typically passwords: even 8 visible chars of a 12-char

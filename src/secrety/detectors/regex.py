@@ -1,20 +1,11 @@
 """Rule-based detection: one regular expression per known secret format."""
 
 from collections.abc import Iterator, Sequence
+from fnmatch import fnmatchcase
 
+from secrety.detectors.base import iter_lines
 from secrety.models import DetectionMethod, Finding
 from secrety.rules import Rule
-
-
-def iter_lines(text: str) -> Iterator[tuple[int, str]]:
-    """Yield ``(line_number, line)`` pairs, splitting on line feeds only.
-
-    ``str.splitlines`` also breaks on form feeds, vertical tabs or U+2028,
-    which would shift line numbers compared with Git, editors and SARIF. A
-    trailing carriage return (Windows line ending) is removed.
-    """
-    for number, line in enumerate(text.split("\n"), start=1):
-        yield number, line.removesuffix("\r")
 
 
 class RegexDetector:
@@ -29,7 +20,8 @@ class RegexDetector:
     Keywords act as a two-level pre-filter, both computed from one lowercase
     copy of the file: rules whose keywords appear nowhere in the file are
     dropped once, then the remaining rules only run on lines containing one
-    of their keywords.
+    of their keywords. Rules with ``paths`` are also dropped when the file
+    name matches none of them.
     """
 
     def __init__(self, rules: Sequence[Rule]) -> None:
@@ -44,7 +36,7 @@ class RegexDetector:
             path: Path reported in findings.
         """
         lowered_text = text.lower()
-        active = self._rules_for(lowered_text)
+        active = self._rules_for(lowered_text, path.rsplit("/", 1)[-1].lower())
         if not active:
             return
         # lower() never adds or removes line feeds, so both sides have the same lines.
@@ -55,12 +47,13 @@ class RegexDetector:
                     continue
                 yield from self._match_line(rule, line, line_no, path)
 
-    def _rules_for(self, lowered_text: str) -> tuple[Rule, ...]:
-        """Keep the rules that have no keyword or whose keyword occurs in the file."""
+    def _rules_for(self, lowered_text: str, name: str) -> tuple[Rule, ...]:
+        """Keep the rules that apply to file ``name`` and whose keywords occur in it."""
         return tuple(
             rule
             for rule in self.rules
-            if not rule.keywords or any(k in lowered_text for k in rule.keywords)
+            if (not rule.paths or any(fnmatchcase(name, p) for p in rule.paths))
+            and (not rule.keywords or any(k in lowered_text for k in rule.keywords))
         )
 
     @staticmethod

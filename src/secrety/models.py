@@ -8,6 +8,7 @@ from enum import StrEnum
 
 _MAX_VISIBLE_EDGE = 4
 _MIN_LENGTH_TO_SHOW_EDGES = 20
+_MAX_MASK_STARS = 120
 _SHORT_SHA = 12
 
 
@@ -62,13 +63,17 @@ class Finding:
         hidden. Longer ones keep up to 4 characters at each edge, never more
         than ``length // 8`` per edge, so at most 25 % is shown. The visible
         prefix is usually a public marker such as ``ghp_`` or ``AKIA``, which
-        is what a reader needs to recognise the key type.
+        is what a reader needs to recognise the key type. At most 120
+        asterisks are printed, so a huge token (an embedded data URI) does not
+        flood the terminal.
         """
         n = len(self.secret)
         if n < _MIN_LENGTH_TO_SHOW_EDGES:
             return "*" * n
         edge = min(_MAX_VISIBLE_EDGE, n // 8)
-        return f"{self.secret[:edge]}{'*' * (n - 2 * edge)}{self.secret[-edge:]}"
+        return (
+            f"{self.secret[:edge]}{'*' * min(n - 2 * edge, _MAX_MASK_STARS)}{self.secret[-edge:]}"
+        )
 
     @property
     def methods(self) -> tuple[DetectionMethod, ...]:

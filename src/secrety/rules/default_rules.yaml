@@ -115,3 +115,18 @@ rules:
     secret_group: 1
     confidence: 0.4
     keywords: [password, passwd, pwd, secret, apikey, api_key, token]
+
+  - id: generic-password-unquoted
+    description: Unquoted password, secret or token in a config file
+    # Config files only: there values are literals (DB_PASSWORD=hunter2),
+    # while in code an unquoted value is an identifier or a call. The key
+    # starts the line, after indentation, an optional YAML list marker
+    # (docker-compose environment) and an optional "export". A value starting
+    # with $ < { % is a reference or a template (${VAR}, <your-password>,
+    # {{ var }}, %(var)s); a quoted one is left to generic-password-assignment.
+    # Entropy cannot gate these: a short password is not random-looking.
+    regex: '(?i)^\s{0,16}(?:-\s{1,8})?(?:export\s{1,8})?[\w.\-]{0,32}?(?:password|passwd|pwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)[\w.\-]{0,32}\s{0,16}[:=]\s{0,16}([^\s"''$<{%#][^\s"'']{7,255})'
+    secret_group: 1
+    confidence: 0.4
+    keywords: [password, passwd, pwd, secret, apikey, api_key, api-key, token]
+    paths: ['.env*', '*.env', '*.ini', '*.cfg', '*.conf', '*.properties', '*.yaml', '*.yml']
