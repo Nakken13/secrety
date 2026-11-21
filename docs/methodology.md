@@ -115,16 +115,70 @@ not base64, so they cut the value into several tokens.
 The other findings are recorded in `Finding.also_matched`, listed as `also:`
 in the terminal output. `Finding.methods` lists every method that fired.
 
+## Reducing false positives
+
+Filtering runs on findings, after detection, so a folder scan and a `--git`
+scan are filtered the same way. Every filter counts what it removes and the
+summary prints the counts: nothing is hidden silently.
+
+1. **Path allowlist.** Findings in test code (`tests/`, `test_*.py`,
+   `*.spec.ts`...), dependency lockfiles (integrity hashes look random) and
+   examples (`examples/`, `*.example`) are dropped by default. Globs follow
+   `.gitignore` conventions: `*` stays inside one folder, `**` spans folders,
+   a pattern without `/` matches the file name at any depth, case is ignored.
+   A `.secrety.toml` at the scanned folder (or `--config FILE`) adds patterns
+   or turns the defaults off:
+
+   ```toml
+   [allowlist]
+   paths = ["vendor/**", "docs/*.md"]
+   use_defaults = false   # also scan tests, lockfiles and examples
+   ```
+
+   Unknown keys are errors, so a typo (`path` for `paths`) cannot silently
+   disable the file.
+2. **Inline ignore.** A line containing `secrety:ignore` is skipped, whatever
+   the comment syntax (`#`, `//`, `<!-- -->`...). `secrety:ignore[rule-a,
+   rule-b]` only ignores those rules. Because one reported finding can stand
+   for several rules that flagged the same place (`also:`), the ids must
+   cover all of them: naming `generic-password-assignment` does not hide the
+   `high-entropy-base64` finding on the same value.
+3. **Classifier** (opt-in, `--classifier`). A logistic regression rescores
+   each remaining finding from features of the value (entropy, length,
+   charset, placeholder words such as `example` or `changeme`), of the name
+   it is assigned to (`password`, `mock_token`) and of the file type. The
+   confidence becomes the model probability, and findings below the
+   threshold (`--classifier-threshold`, default from the model) are dropped.
+   The model is versioned JSON evaluated in pure Python: no pickle is loaded
+   and scikit-learn is not needed at runtime (see
+   `docs/decisions/0001-classifier-format.md`). Until the evaluation trains
+   it, the packaged model is a hand-set stub and the CLI says so.
+
+Custom rules (`--rules`) are checked for unbounded quantifiers (`+`, `*`,
+`{n,}`), which can backtrack for a long time on a long line. The bundled
+rules bound every repetition, and a test keeps it that way.
+
 ## Known weaknesses
 
 - **Short secrets are invisible to entropy.** See the length bound above.
   Passwords are left to the regex rules, quoted and unquoted.
 - **Public base64 data.** Certificate bundles (`cacert.pem`), embedded images
   and lock-file integrity hashes are high entropy and not secret. Scanning
-  pip's own package gives about 2,550 findings from `cacert.pem` alone. Task 04
-  handles this (path and context filters, classifier).
+  pip's own package gives about 2,550 findings from `cacert.pem` alone.
+  Lockfiles are allowlisted by default; certificate bundles are not (a `.pem`
+  can hold a private key), so add them to `.secrety.toml` when needed.
 - **Hex hashes.** Git SHAs, checksums and SHA-256 digests (about 3.7 bits)
-  exceed the hex threshold (3.0). Task 04 handles them too.
+  exceed the hex threshold (3.0). Outside lockfiles, only the trained
+  classifier (task 07) can tell them apart.
+- **Allowlisted paths are trusted.** A real secret committed under `tests/`
+  or in an allowlisted folder is not reported, only counted. `.secrety.toml`
+  is read from the scanned repository, so whoever controls the repository
+  controls what is skipped: a CI scan of untrusted code should pass its own
+  `--config` (which replaces the repository's file).
+- **The stub classifier is not evidence.** Its weights are hand-set: use
+  `--classifier` for triage, not as a gate, until task 07 publishes metrics.
+  Its `value_placeholder` feature fires on `FAKE`, so the evaluation corpus
+  must not mark its positive samples that way.
 - **Alphabet literals and URL paths.** `"ABC...xyz0123456789"` or
   `github.com/python/cpython/blob/<sha>` look random to the formula.
 - **Character frequency only.** `H` ignores order, so `abcdabcd...` scores like
