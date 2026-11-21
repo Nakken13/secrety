@@ -37,6 +37,7 @@ class ScanStats:
     commits: int = 0
     skipped_binary: int = 0
     skipped_large: int = 0
+    skipped_links: int = 0
     unreadable: int = 0
 
 

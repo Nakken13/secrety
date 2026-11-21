@@ -30,6 +30,8 @@ DEFAULT_EXCLUDED_DIRS = frozenset(
 )
 _UTF16_BOMS = (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+# Bit 29 of a reparse tag: the reparse point names another path (IsReparseTagNameSurrogate).
+_NAME_SURROGATE = 0x20000000
 
 
 def is_binary(head: bytes) -> bool:
@@ -49,13 +51,18 @@ def decode(data: bytes) -> str:
 
 
 def _is_link(info: os.stat_result) -> bool:
-    """Symbolic link, or Windows junction / reparse point (from ``lstat``).
+    """Symbolic link or Windows junction, from ``lstat``.
 
     ``Path.is_symlink`` and ``os.walk(followlinks=False)`` do not recognise
-    NTFS junctions on Python 3.11, hence the reparse-point attribute.
+    NTFS junctions on Python 3.11, hence the reparse-point check. Only
+    reparse points whose tag is a *name surrogate* (they point at another
+    path: symlinks, junctions) count as links. Other reparse points are
+    ordinary files stored differently, such as OneDrive placeholders or
+    deduplicated files, and must still be scanned.
     """
     attributes = getattr(info, "st_file_attributes", 0)
-    return stat.S_ISLNK(info.st_mode) or bool(attributes & _REPARSE_POINT)
+    tag = getattr(info, "st_reparse_tag", 0)
+    return stat.S_ISLNK(info.st_mode) or bool(attributes & _REPARSE_POINT and tag & _NAME_SURROGATE)
 
 
 def is_link(path: Path) -> bool:
@@ -97,7 +104,15 @@ class FilesystemSource:
         ):
             here = Path(dirpath)
             # Prune in place so os.walk never descends into excluded folders or links.
-            dirnames[:] = sorted(d for d in dirnames if d not in excluded and not is_link(here / d))
+            kept = []
+            for d in sorted(dirnames):
+                if d in excluded:
+                    continue
+                if is_link(here / d):
+                    self.stats.skipped_links += 1
+                    continue
+                kept.append(d)
+            dirnames[:] = kept
             for name in sorted(filenames):
                 path = here / name
                 if file := self._read(path, path.relative_to(root).as_posix()):
@@ -116,7 +131,10 @@ class FilesystemSource:
         """
         try:
             info = os.stat(path) if follow_link else os.lstat(path)
-            if _is_link(info) or not stat.S_ISREG(info.st_mode):
+            if _is_link(info):
+                self.stats.skipped_links += 1
+                return None
+            if not stat.S_ISREG(info.st_mode):
                 return None
             if info.st_size > self.max_file_size:
                 self.stats.skipped_large += 1

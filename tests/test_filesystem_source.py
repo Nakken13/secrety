@@ -1,11 +1,14 @@
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from secrety.sources import FilesystemSource, Source, SourceFile
+from secrety.sources.filesystem import _is_link
 
 
 def write(root: Path, rel: str, content: str | bytes) -> Path:
@@ -110,7 +113,9 @@ def test_does_not_follow_windows_junctions(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
     )
-    assert paths(FilesystemSource(root)) == ["inside.txt"]
+    source = FilesystemSource(root)
+    assert paths(source) == ["inside.txt"]
+    assert source.stats.skipped_links == 1
 
 
 def test_unreadable_file_is_counted_and_scan_continues(
@@ -178,3 +183,45 @@ def test_source_file_commit_defaults_to_none() -> None:
 
 def test_filesystem_source_satisfies_source_protocol(tmp_path: Path) -> None:
     assert isinstance(FilesystemSource(tmp_path), Source)
+
+
+def fake_stat(mode: int, attributes: int = 0, tag: int = 0) -> os.stat_result:
+    return SimpleNamespace(  # type: ignore[return-value]
+        st_mode=mode, st_file_attributes=attributes, st_reparse_tag=tag
+    )
+
+
+_REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        (fake_stat(stat.S_IFREG), False),
+        (fake_stat(stat.S_IFLNK), True),
+        (fake_stat(stat.S_IFDIR, _REPARSE, 0xA0000003), True),  # junction (mount point)
+        (fake_stat(stat.S_IFREG, _REPARSE, 0xA000000C), True),  # symlink
+        # OneDrive / cloud placeholder: a real file stored elsewhere, not a link.
+        (fake_stat(stat.S_IFREG, _REPARSE, 0x9000001A), False),
+        # Deduplicated file (Windows Server data deduplication).
+        (fake_stat(stat.S_IFREG, _REPARSE, 0x80000013), False),
+    ],
+)
+def test_only_name_surrogate_reparse_points_are_links(info: os.stat_result, expected: bool) -> None:
+    assert _is_link(info) is expected
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+def test_skipped_symlinks_are_counted(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x", encoding="utf-8")
+    root = tmp_path / "root"
+    root.mkdir()
+    try:
+        (root / "link.txt").symlink_to(outside)
+        (root / "linkdir").symlink_to(tmp_path, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation not permitted")
+    source = FilesystemSource(root)
+    assert paths(source) == []
+    assert source.stats.skipped_links == 2

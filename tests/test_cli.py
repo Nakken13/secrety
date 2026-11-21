@@ -362,3 +362,21 @@ def test_custom_rules_with_unbounded_quantifier_warn(tmp_path: Path) -> None:
 
 def test_bundled_rules_print_no_quantifier_warning(tmp_path: Path) -> None:
     assert "unbounded" not in runner.invoke(app, ["scan", str(tmp_path)]).output
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS junctions are Windows-only")
+def test_summary_reports_skipped_links(tmp_path: Path) -> None:
+    (tmp_path / "outside").mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(root / "j"), str(tmp_path / "outside")],
+        check=True,
+        capture_output=True,
+    )
+    result = runner.invoke(app, ["scan", str(root)])
+    assert "1 link(s) not followed" in result.output
+
+
+def test_summary_omits_links_when_none(tmp_path: Path) -> None:
+    assert "link(s)" not in runner.invoke(app, ["scan", str(tmp_path)]).output

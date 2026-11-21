@@ -267,6 +267,8 @@ def _summary(stats: ScanStats) -> str:
         f"\n{scanned} scanned, {stats.skipped_binary} binary and "
         f"{stats.skipped_large} large file(s) skipped."
     )
+    if stats.skipped_links:
+        summary += f" {stats.skipped_links} link(s) not followed."
     if stats.unreadable:
         summary += f" [yellow]{stats.unreadable} path(s) could not be read.[/yellow]"
     return summary
