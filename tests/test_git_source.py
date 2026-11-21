@@ -307,3 +307,17 @@ def test_overlapping_secrets_both_found_in_head(git_repo: GitRepo) -> None:
     second = make_finding(commit="0" * 40, secret="FAKEXYZdef", line_content="K=")
     marked = GitSource(git_repo.path).mark_removed([first, second])
     assert [f.removed_later for f in marked] == [False, False]
+
+
+def test_a_nul_line_added_mid_file_does_not_hide_the_next_lines(git_repo: GitRepo) -> None:
+    # The file on disk starts with plain text, so a folder scan reads it whole:
+    # the history scan must not call this change binary either.
+    head = "x" * 100 + "\n"
+    git_repo.commit("text", **{"a.env": head * 100})
+    leak = git_repo.commit(
+        "leak", **{"a.env": head * 100 + "bin\x00ary\n" + f"T={fakes.GITHUB_TOKEN}\n"}
+    )
+    source = GitSource(git_repo.path)
+    findings = scan(source, [RegexDetector(load_rules())]).findings
+    assert [(f.commit, f.line) for f in findings] == [(leak, 102)]
+    assert source.stats.skipped_binary == 0

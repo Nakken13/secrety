@@ -65,17 +65,21 @@ class _Pending:
     def add(self, number: int, raw: bytes, max_size: int) -> None:
         """Record one added line.
 
-        Everything is dropped once ``max_size`` is passed, or when the first
-        8 KiB hold a NUL byte, as for a file on disk. Binary content is
+        Everything is dropped once ``max_size`` is passed. Binary content is
         detected here because ``git log --text`` ignores the repository's own,
-        untrusted, binary attributes. A NUL further down does not drop lines
-        already seen, so it cannot hide a secret placed above it.
+        untrusted, binary attributes, and it is judged as for a file on disk:
+        the version is binary only when a NUL shows up in its first 8 KiB,
+        i.e. while the added lines run unbroken from line 1. Anywhere else, a
+        line holding a NUL is skipped alone, so it cannot hide the lines
+        around it from the scan.
         """
         if self.too_large or self.binary:
             return
-        if self.size < BINARY_SNIFF_SIZE and is_binary(raw[: BINARY_SNIFF_SIZE - self.size]):
-            self.binary = True
-            self.lines.clear()
+        if b"\x00" in raw:
+            at_head = self.size < BINARY_SNIFF_SIZE and number == len(self.lines) + 1
+            if at_head and is_binary(raw[: BINARY_SNIFF_SIZE - self.size]):
+                self.binary = True
+                self.lines.clear()
             return
         self.size += len(raw) + 1
         if self.size > max_size:
