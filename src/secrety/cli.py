@@ -168,7 +168,7 @@ def scan(
 
 def _fail(message: str, cause: BaseException | None = None) -> NoReturn:
     """Print ``message`` as an error and exit with :data:`EXIT_ERROR`."""
-    console.print(f"[red]Error:[/red] {escape(message)}")
+    console.print(f"[red]Error:[/red] {_safe(message)}")
     raise typer.Exit(EXIT_ERROR) from cause
 
 
@@ -183,23 +183,21 @@ def _scan_history(
     # Imported here: GitPython fails at import time when git is not installed,
     # which must not break a plain folder scan.
     try:
-        import git
-
-        from secrety.sources.git import GitSource
+        from secrety.sources.git import scan_history
     except ImportError as exc:
         _fail(f"--git needs GitPython and the git executable: {exc}", exc)
-    source = GitSource(path, max_commits=max_commits, since=since, max_file_size=max_file_size)
     try:
-        findings = source.mark_removed(run_scan(source, detectors).findings)
-        shallow = source.is_shallow()
-    except (ValueError, git.GitError) as exc:
+        result = scan_history(
+            path, detectors, max_commits=max_commits, since=since, max_file_size=max_file_size
+        )
+    except ValueError as exc:
         _fail(str(exc), exc)
-    if shallow:
+    if result.shallow:
         console.print(
             "[yellow]Warning: shallow clone. Older history is missing, and the oldest "
             "commit is reported as adding every file it contains.[/yellow]"
         )
-    return findings, source.stats
+    return result.findings, result.stats
 
 
 def _summary(stats: ScanStats) -> str:

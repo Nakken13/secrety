@@ -16,6 +16,9 @@ class SourceFile:
             source), or ``None`` for a file on disk.
         author: ``Name <email>`` of the commit author (Git history only).
         date: Author date of the commit, ISO 8601 (Git history only).
+        line_offset: Line number of ``text``'s first line in the real file,
+            minus one, when ``text`` is an excerpt (Git history: the lines a
+            commit added). Findings are shifted by it.
     """
 
     path: str
@@ -23,6 +26,7 @@ class SourceFile:
     commit: str | None = None
     author: str | None = None
     date: str | None = None
+    line_offset: int = 0
 
 
 @dataclass(slots=True)

@@ -31,6 +31,8 @@ def scan(source: Source, detectors: Sequence[Detector]) -> ScanResult:
     for file in source:
         file_findings = [f for detector in detectors for f in detector.scan(file.text, file.path)]
         for finding in merge_duplicates(file_findings):
+            if file.line_offset:
+                finding = replace(finding, line=finding.line + file.line_offset)
             if file.commit:
                 finding = replace(finding, commit=file.commit, author=file.author, date=file.date)
             findings.append(finding)

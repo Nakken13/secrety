@@ -19,6 +19,12 @@ _GIT_ENV = {
     "GIT_AUTHOR_EMAIL": "author@example.com",
     "GIT_COMMITTER_NAME": "Test Author",
     "GIT_COMMITTER_EMAIL": "author@example.com",
+    # Config for the fixture's own commands, without a `git config` spawn each.
+    "GIT_CONFIG_COUNT": "2",
+    "GIT_CONFIG_KEY_0": "core.autocrlf",
+    "GIT_CONFIG_VALUE_0": "false",
+    "GIT_CONFIG_KEY_1": "commit.gpgsign",
+    "GIT_CONFIG_VALUE_1": "false",
 }
 BASE_DATE = "2024-01-{day:02d}T12:00:00+00:00"
 
@@ -67,6 +73,4 @@ def git_repo(tmp_path: Path) -> Iterator[GitRepo]:
     path.mkdir()
     repo = GitRepo(path)
     repo.git("init", "--quiet", "--initial-branch=main")
-    repo.git("config", "core.autocrlf", "false")
-    repo.git("config", "commit.gpgsign", "false")
     yield repo

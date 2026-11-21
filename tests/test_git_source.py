@@ -15,7 +15,7 @@ from test_models import make_finding
 
 
 def files_of(repo: GitRepo, **options: object) -> list[tuple[str, str, str]]:
-    """``(short sha, path, text)`` of every file version the source yields."""
+    """``(short sha, path, text)`` of every excerpt the source yields."""
     return [(f.commit[:7], f.path, f.text) for f in GitSource(repo.path, **options)]  # type: ignore[index,arg-type]
 
 
@@ -25,10 +25,28 @@ def test_yields_only_the_lines_added_by_each_commit(git_repo: GitRepo) -> None:
     assert (
         files_of(git_repo)
         == [
-            (second[:7], "a.txt", "\nNEW"),  # newest first, line 2 kept at line 2
+            (second[:7], "a.txt", "NEW"),  # newest first
             (first[:7], "a.txt", "alpha\nbeta"),
         ]
     )
+
+
+def test_each_run_of_added_lines_is_one_excerpt_at_its_offset(git_repo: GitRepo) -> None:
+    body = [f"line {n}" for n in range(1, 5001)]
+    git_repo.commit("one", **{"big.txt": "\n".join(body) + "\n"})
+    body[1] = "CHANGED 2"
+    body[4998] = "CHANGED 4999"
+    git_repo.commit("two", **{"big.txt": "\n".join(body) + "\n"})
+    newest = [f for f in GitSource(git_repo.path) if f.text.startswith("CHANGED")]
+    assert [(f.line_offset, f.text) for f in newest] == [(1, "CHANGED 2"), (4998, "CHANGED 4999")]
+
+
+def test_a_nul_byte_far_down_does_not_hide_the_lines_above(git_repo: GitRepo) -> None:
+    filler = "x" * 100 + "\n"
+    content = f"T={fakes.GITHUB_TOKEN}\n" + filler * 100 + "bin\x00ary\n"
+    git_repo.commit("one", **{"a.env": content})
+    findings = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert [(f.path, f.line) for f in findings] == [("a.env", 1)]
 
 
 def test_attaches_author_and_date(git_repo: GitRepo) -> None:
