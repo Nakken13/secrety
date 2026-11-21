@@ -231,3 +231,19 @@ def test_git_options_require_git(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path), "--max-commits", "1"])
     assert result.exit_code == 2
     assert "--git" in result.output
+
+
+def test_control_characters_from_the_repository_are_not_sent_to_the_terminal(
+    git_repo: GitRepo,
+) -> None:
+    git_repo.commit("leak", **{"a.env": f"T={fakes.GITHUB_TOKEN}\n"})
+    git_repo.git("commit", "--amend", "--quiet", "--no-edit", "--author=Evil\x1b[2J\x9b <e@x>")
+    result = runner.invoke(app, ["scan", str(git_repo.path), "--git"])
+    assert "\x1b" not in result.output
+    assert "\x9b" not in result.output
+    assert "Evil\\x1b[2J\\x9b" in result.output
+
+
+def test_git_help_says_only_head_history_is_scanned() -> None:
+    result = runner.invoke(app, ["scan", "--help"])
+    assert "reachable from HEAD" in " ".join(result.output.replace("\u2502", " ").split())

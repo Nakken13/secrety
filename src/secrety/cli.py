@@ -1,5 +1,6 @@
 """Command-line interface for secrety."""
 
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,8 @@ from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
 
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
+# C0 controls, DEL and C1 controls: ESC or CSI could drive the terminal.
+_CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
 _DATE_FORMATS = ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]
 
 app = typer.Typer(
@@ -60,6 +63,16 @@ def main(
     """Scan source code and Git history for exposed secrets."""
 
 
+def _safe(text: str) -> str:
+    """Make untrusted text (paths, authors, rule ids) safe to print.
+
+    Control characters (ESC, CSI...) are shown as hex escapes so they cannot
+    drive the terminal, then Rich markup is escaped (a file named
+    ``[link=...]x`` stays literal).
+    """
+    return escape(_CONTROL_CHARS.sub(lambda m: f"\\x{ord(m.group()):02x}", text))
+
+
 def _print_findings(findings: list[Finding]) -> None:
     """Print one line per finding, with the secret masked.
 
@@ -76,8 +89,8 @@ def _print_findings(findings: list[Finding]) -> None:
         if f.removed_later:
             details.append("removed from HEAD, still in history")
         console.print(
-            f"{escape(f.location)}  [bold]{escape(f.rule_id)}[/bold]  {escape(f.masked())}  "
-            f"[dim]({escape('; '.join(details))})[/dim]"
+            f"{_safe(f.location)}  [bold]{_safe(f.rule_id)}[/bold]  {_safe(f.masked())}  "
+            f"[dim]({_safe('; '.join(details))})[/dim]"
         )
 
 
@@ -108,8 +121,9 @@ def scan(
         bool,
         typer.Option(
             "--git",
-            help="Scan the lines added by every commit of the repository at PATH "
-            "instead of the files on disk (uncommitted changes are not scanned).",
+            help="Scan the lines added by every commit reachable from HEAD in the "
+            "repository at PATH, instead of the files on disk (other branches and "
+            "uncommitted changes are not scanned).",
         ),
     ] = False,
     max_commits: Annotated[
@@ -117,7 +131,9 @@ def scan(
     ] = None,
     since: Annotated[
         datetime | None,
-        typer.Option(formats=_DATE_FORMATS, help="With --git: scan only commits after this date."),
+        typer.Option(
+            formats=_DATE_FORMATS, help="With --git: scan only commits committed after this date."
+        ),
     ] = None,
 ) -> None:
     """Scan PATH for exposed secrets.

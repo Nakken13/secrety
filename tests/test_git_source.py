@@ -1,6 +1,8 @@
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+import git
 import pytest
 
 import fakes
@@ -197,3 +199,93 @@ def test_since_skips_older_commits(git_repo: GitRepo) -> None:
 def test_subfolder_limits_history_to_it(git_repo: GitRepo) -> None:
     git_repo.commit("one", **{"src__a.txt": "a\n", "doc__b.txt": "b\n"})
     assert [f.path for f in GitSource(git_repo.path / "src")] == ["src/a.txt"]
+
+
+# --- Hardening against repository content and config (review findings) ---
+
+
+def test_subfolder_scan_follows_merged_side_branches(git_repo: GitRepo) -> None:
+    git_repo.commit("base", **{"sub__f.txt": "a\n", "other.txt": "o\n"})
+    git_repo.git("checkout", "--quiet", "-b", "side")
+    leak = git_repo.commit("leak", **{"sub__f.txt": f"a\nT={fakes.GITHUB_TOKEN}\n"})
+    git_repo.commit("unleak", **{"sub__f.txt": "a\n"})
+    git_repo.git("checkout", "--quiet", "main")
+    git_repo.commit("main", **{"other.txt": "o\n2\n"})
+    git_repo.git("merge", "--quiet", "--no-edit", "side")
+    findings = scan(GitSource(git_repo.path / "sub"), [RegexDetector(load_rules())]).findings
+    assert [f.commit for f in findings] == [leak]
+
+
+def test_log_output_encoding_config_is_ignored(git_repo: GitRepo) -> None:
+    git_repo.commit("leak", **{"a.env": f"T={fakes.GITHUB_TOKEN}\n"})
+    git_repo.git("config", "i18n.logOutputEncoding", "UTF-16")
+    findings = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert len(findings) == 1
+
+
+def test_root_commit_is_scanned_even_with_show_root_off(git_repo: GitRepo) -> None:
+    git_repo.commit("leak", **{"a.env": f"T={fakes.GITHUB_TOKEN}\n"})
+    git_repo.git("config", "log.showRoot", "false")
+    assert [f.path for f in GitSource(git_repo.path)] == ["a.env"]
+
+
+def test_gitattributes_cannot_hide_text_files(git_repo: GitRepo) -> None:
+    git_repo.commit("leak", **{".gitattributes": "* -diff\n", "a.env": f"T={fakes.GITHUB_TOKEN}\n"})
+    source = GitSource(git_repo.path)
+    findings = source.mark_removed(scan(source, [RegexDetector(load_rules())]).findings)
+    assert [(f.path, f.removed_later) for f in findings] == [("a.env", False)]
+    assert source.stats.skipped_binary == 0
+
+
+def test_crlf_lines_keep_their_content_and_line(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.env": f"A=1\r\nT={fakes.GITHUB_TOKEN}\r\n"})
+    (finding,) = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert (finding.line, finding.secret) == (2, fakes.GITHUB_TOKEN)
+
+
+def test_octopus_merge_reports_only_lines_new_to_every_parent(git_repo: GitRepo) -> None:
+    git_repo.commit("base", **{"a.txt": "a\n"})
+    for branch in ("b1", "b2"):
+        git_repo.git("checkout", "--quiet", "-b", branch, "main")
+        git_repo.commit(branch, **{f"{branch}.txt": f"{branch}\n"})
+    git_repo.git("checkout", "--quiet", "main")
+    git_repo.git("merge", "--quiet", "--no-commit", "b1", "b2")
+    git_repo.write("a.txt", f"a\nT={fakes.GITHUB_TOKEN}\n")
+    evil = git_repo.commit("octopus")
+    findings = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert [(f.commit, f.path, f.line) for f in findings] == [(evil, "a.txt", 2)]
+
+
+def test_stopping_early_does_not_raise(git_repo: GitRepo) -> None:
+    for day in range(3):
+        git_repo.commit(f"c{day}", **{f"f{day}.txt": "x\n" * 2000})
+    iterator = iter(GitSource(git_repo.path))
+    next(iterator)
+    iterator.close()  # type: ignore[attr-defined]
+
+
+def test_secrets_are_not_passed_on_the_command_line(
+    git_repo: GitRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git_repo.commit("leak", **{"a.env": f"T={fakes.GITHUB_TOKEN}\n"})
+    source = GitSource(git_repo.path)
+    findings = scan(source, [RegexDetector(load_rules())]).findings
+    commands: list[str] = []
+    real_popen = git.cmd.Popen
+
+    def spy(cmd: object, *args: object, **kwargs: object) -> subprocess.Popen:  # type: ignore[type-arg]
+        commands.append(str(cmd))
+        return real_popen(cmd, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(git.cmd, "Popen", spy)
+    source.mark_removed(findings)
+    assert commands
+    assert not any(fakes.GITHUB_TOKEN in c for c in commands)
+
+
+def test_overlapping_secrets_both_found_in_head(git_repo: GitRepo) -> None:
+    git_repo.commit("one", **{"a.env": "K=abcFAKEXYZdef\n"})
+    first = make_finding(commit="0" * 40, secret="abcFAKEXYZ", line_content="K=")
+    second = make_finding(commit="0" * 40, secret="FAKEXYZdef", line_content="K=")
+    marked = GitSource(git_repo.path).mark_removed([first, second])
+    assert [f.removed_later for f in marked] == [False, False]

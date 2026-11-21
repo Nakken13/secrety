@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import codecs
 import re
+import subprocess
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -21,15 +22,13 @@ import git
 
 from secrety.models import Finding
 from secrety.sources.base import ScanStats, SourceFile
-from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE, decode
+from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE, decode, is_binary
 
 # Start of each commit in the log output. \x01 cannot start a patch line,
 # which always begins with "+", "-", " ", "@", "\\", "diff" or a header word.
 _COMMIT_MARK = b"\x01"
 _LOG_FORMAT = "%x01%H%x00%an <%ae>%x00%aI"
 # "@@ -a,b +c,d @@" (one parent) or "@@@ -a,b -c,d +e,f @@@" (merge).
-# Keeps each `git grep` command line well under the Windows 32 KiB limit.
-_GREP_BATCH_CHARS = 16_000
 _HUNK = re.compile(rb"^(@{2,}) (?:-\d+(?:,\d+)? )+\+(\d+)(?:,\d+)? @{2,}")
 
 
@@ -56,8 +55,17 @@ class _Pending:
     too_large: bool = False
 
     def add(self, number: int, raw: bytes, max_size: int) -> None:
-        """Record one added line, dropping everything once ``max_size`` is passed."""
-        if self.too_large:
+        """Record one added line.
+
+        Everything is dropped once ``max_size`` is passed, or when a line holds
+        a NUL byte (binary content, detected here because ``git log --text``
+        ignores the repository's own, untrusted, binary attributes).
+        """
+        if self.too_large or self.binary:
+            return
+        if is_binary(raw):
+            self.binary = True
+            self.lines.clear()
             return
         self.size += len(raw) + 1
         if self.size > max_size:
@@ -92,13 +100,16 @@ class _Commit:
 class GitSource:
     """Iterate over the lines added by every commit reachable from ``HEAD``.
 
+    Other branches and tags are not scanned unless merged into ``HEAD``.
+
     Yields one :class:`SourceFile` per (commit, file), newest commit first.
 
     Attributes:
         root: The repository, or a folder inside it (the history is then
             limited to that folder). Paths are relative to the repository root.
         max_commits: Scan only this many commits, newest first.
-        since: Scan only commits more recent than this date.
+        since: Scan only commits more recent than this date (committer date,
+            as ``git log --since``).
         max_file_size: Skip a file version whose added lines exceed this size.
     """
 
@@ -115,11 +126,16 @@ class GitSource:
             if not repo.head.is_valid():
                 raise ValueError(f"{self.root}: the repository has no commits")
             process = repo.git.log(*self._log_args(repo), as_process=True)
+            finished = False
             try:
                 yield from self._parse(process.proc.stdout)  # type: ignore[arg-type]
+                finished = True
             finally:
-                process.proc.stdout.close()
-                process.wait()
+                if finished:
+                    process.wait()  # raises GitCommandError on a git failure
+                else:  # consumer stopped early or failed: do not mask its error
+                    process.proc.kill()
+                    process.proc.communicate()
 
     def mark_removed(self, findings: Sequence[Finding]) -> list[Finding]:
         """Set :attr:`~secrety.models.Finding.removed_later` on history findings.
@@ -133,37 +149,38 @@ class GitSource:
         if not probes:
             return list(findings)
         with self._open() as repo:
-            matches = self._grep_head(repo, sorted(set(probes.values())))
-        # git grep -o prints the longest match only, so a secret contained in a
-        # longer one on the same line shows up inside that longer match.
-        present = {secret for secret, probe in probes.items() if any(probe in m for m in matches)}
+            lines = self._grep_head(repo, sorted(set(probes.values())))
+        present = {secret for secret, probe in probes.items() if any(probe in x for x in lines)}
         return [
             replace(f, removed_later=f.secret not in present) if f.commit else f for f in findings
         ]
 
     @staticmethod
-    def _grep_head(repo: git.Repo, patterns: list[str]) -> set[str]:
-        """Return every text of ``HEAD`` matching one of ``patterns`` (fixed strings)."""
-        matches: set[str] = set()
-        batch: list[str] = []
-        size = 0
-        for pattern in [*patterns, None]:
-            if batch and (pattern is None or size + len(pattern) > _GREP_BATCH_CHARS):
-                args = [arg for p in batch for arg in ("-e", p)]
-                try:
-                    out = repo.git.grep(
-                        "-I", "-F", "-o", "-h", "--no-color", "--no-textconv", *args, "HEAD", "--"
-                    )
-                except git.GitCommandError as exc:
-                    if exc.status != 1:  # 1 means "no match"
-                        raise
-                    out = ""
-                matches.update(out.splitlines())
-                batch, size = [], 0
-            if pattern is not None:
-                batch.append(pattern)
-                size += len(pattern)
-        return matches
+    def _grep_head(repo: git.Repo, patterns: list[str]) -> list[str]:
+        """Return the lines of ``HEAD`` containing one of ``patterns`` (fixed strings).
+
+        Patterns go through stdin, never the command line, where other local
+        users could read the secrets in the process list. ``-a`` searches
+        every file, whatever the repository's attributes say is binary.
+        """
+        process = repo.git.grep(
+            "-a",
+            "-F",
+            "-h",
+            "--no-color",
+            "--no-textconv",
+            "-f",
+            "-",
+            "HEAD",
+            "--",
+            as_process=True,
+            istream=subprocess.PIPE,
+        )
+        data = "\n".join(patterns).encode("utf-8") + b"\n"
+        out, err = process.proc.communicate(data)
+        if process.proc.returncode not in (0, 1):  # 1 means "no match"
+            raise git.GitCommandError(["git", "grep"], process.proc.returncode, err)
+        return decode(out).split("\n")
 
     def _open(self) -> git.Repo:
         try:
@@ -188,6 +205,10 @@ class GitSource:
         args = [
             "--patch",
             "--cc",  # merges: only lines that are new compared with every parent
+            "--root",  # the first commit's diff, even with log.showRoot=false
+            "--full-history",  # a path filter must not drop merged side branches
+            "--text",  # repository attributes must not hide files as binary
+            "--encoding=UTF-8",  # ignore i18n.logOutputEncoding
             "--unified=0",
             "--find-renames",
             "--no-color",
@@ -250,6 +271,8 @@ class GitSource:
                 self.stats.commits += 1
                 pending, in_hunk = _Pending(), False
             elif line.startswith(b"diff "):
+                if commit is None:  # a config changed the header format
+                    raise ValueError(f"{self.root}: unexpected `git log` output")
                 yield from flush()
                 pending, in_hunk = _Pending(), False
             elif in_hunk and line[:1] in (b"+", b"-", b" "):
@@ -263,8 +286,6 @@ class GitSource:
                 in_hunk = True
                 parents = len(match.group(1)) - 1
                 new_line = int(match.group(2))
-            elif line.startswith(b"Binary files "):
-                pending.binary = True
             elif line.startswith(b"+++ ") and line != b"+++ /dev/null":
                 pending.path = _new_path(line[len(b"+++ ") :])
         yield from flush()
