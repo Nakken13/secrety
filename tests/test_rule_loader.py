@@ -120,7 +120,7 @@ def test_paths_default_to_every_file() -> None:
     assert rule.paths == ()
 
 
-@pytest.mark.parametrize("paths", ["'*.env'", "[1]", "['']"])
+@pytest.mark.parametrize("paths", ["'*.env'", "[1]", "['']", "['config/*.yml']"])
 def test_invalid_paths_are_rejected(paths: str) -> None:
     with pytest.raises(RuleError, match="paths"):
         parse_rules(f"rules:\n  - {{id: a, description: A, regex: 'abc', paths: {paths}}}\n")

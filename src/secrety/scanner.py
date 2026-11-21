@@ -69,4 +69,4 @@ def _keep_best(group: list[Finding]) -> Finding:
     # ``group`` is sorted by column and min() keeps the first of equal keys.
     best = min(group, key=lambda f: (f.method is not DetectionMethod.REGEX, -f.confidence))
     others = tuple((f.rule_id, f.method) for f in group if f is not best)
-    return replace(best, also_matched=best.also_matched + others)
+    return replace(best, also_matched=others)

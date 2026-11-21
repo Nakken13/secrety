@@ -12,13 +12,11 @@ from secrety.config import (
     DEFAULT_BASE64_THRESHOLD,
     DEFAULT_HEX_THRESHOLD,
     DEFAULT_MIN_LENGTH,
-    MAX_BASE64_ENTROPY,
-    MAX_HEX_ENTROPY,
     EntropyConfig,
 )
 from secrety.detectors import EntropyDetector, RegexDetector
 from secrety.models import Finding
-from secrety.rules import RuleError, load_rules
+from secrety.rules import load_rules
 from secrety.scanner import scan as run_scan
 from secrety.sources import FilesystemSource, ScanStats
 from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
@@ -88,43 +86,29 @@ def scan(
     max_file_size: Annotated[
         int, typer.Option(min=1, help="Skip files larger than this many bytes.")
     ] = DEFAULT_MAX_FILE_SIZE,
+    # Ranges are checked once, by EntropyConfig, not duplicated as typer bounds.
     entropy_base64_threshold: Annotated[
-        float,
-        typer.Option(
-            min=0.0,
-            max=MAX_BASE64_ENTROPY,
-            help="Minimum entropy (bits/char) to flag a base64 token.",
-        ),
+        float, typer.Option(help="Minimum entropy (bits/char, max 6) to flag a base64 token.")
     ] = DEFAULT_BASE64_THRESHOLD,
     entropy_hex_threshold: Annotated[
-        float,
-        typer.Option(
-            min=0.0,
-            max=MAX_HEX_ENTROPY,
-            help="Minimum entropy (bits/char) to flag a hex token.",
-        ),
+        float, typer.Option(help="Minimum entropy (bits/char, max 4) to flag a hex token.")
     ] = DEFAULT_HEX_THRESHOLD,
     entropy_min_length: Annotated[
-        int, typer.Option(min=1, help="Shortest token checked for entropy.")
+        int, typer.Option(help="Shortest token checked for entropy.")
     ] = DEFAULT_MIN_LENGTH,
 ) -> None:
     """Scan PATH for exposed secrets.
 
     Exit code: 0 if nothing is found, 1 if secrets are found, 2 on error.
     """
-    try:
+    try:  # RuleError is a ValueError: one error path for rules and settings
         loaded_rules = load_rules(rules)
-    except RuleError as exc:
-        console.print(f"[red]Error:[/red] {escape(str(exc))}")
-        raise typer.Exit(EXIT_ERROR) from exc
-
-    try:
         entropy = EntropyConfig(
             base64_threshold=entropy_base64_threshold,
             hex_threshold=entropy_hex_threshold,
             min_length=entropy_min_length,
         )
-    except ValueError as exc:  # a threshold of exactly 0, which typer lets through
+    except ValueError as exc:
         console.print(f"[red]Error:[/red] {escape(str(exc))}")
         raise typer.Exit(EXIT_ERROR) from exc
     detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]

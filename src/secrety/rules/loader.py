@@ -66,6 +66,14 @@ def _is_number(value: Any, *, integer: bool = False) -> bool:
     return isinstance(value, kinds) and not isinstance(value, bool)
 
 
+def _lowercase_strings(raw: dict[str, Any], key: str, where: str) -> tuple[str, ...]:
+    """Validate the optional list-of-strings field ``key`` and lowercase it."""
+    values = raw.get(key) or []
+    if not isinstance(values, list) or not all(isinstance(v, str) and v for v in values):
+        raise RuleError(f"{where}: {key} must be a list of non-empty strings")
+    return tuple(v.lower() for v in values)
+
+
 def _build_rule(raw: Any, index: int, source: str) -> Rule:
     """Validate one raw YAML mapping and turn it into a :class:`Rule`."""
     where = f"{source}: rule #{index}"
@@ -97,13 +105,10 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
     if not _is_number(confidence) or not 0.0 <= confidence <= 1.0:
         raise RuleError(f"{where}: confidence must be a number in [0, 1], got {confidence!r}")
 
-    keywords = raw.get("keywords") or []
-    if not isinstance(keywords, list) or not all(isinstance(k, str) and k for k in keywords):
-        raise RuleError(f"{where}: keywords must be a list of non-empty strings")
-
-    paths = raw.get("paths") or []
-    if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
-        raise RuleError(f"{where}: paths must be a list of non-empty glob strings")
+    keywords = _lowercase_strings(raw, "keywords", where)
+    paths = _lowercase_strings(raw, "paths", where)
+    if any("/" in p for p in paths):
+        raise RuleError(f"{where}: paths are matched on the file name only, '/' cannot match")
 
     return Rule(
         id=raw["id"],
@@ -111,8 +116,8 @@ def _build_rule(raw: Any, index: int, source: str) -> Rule:
         pattern=pattern,
         secret_group=secret_group,
         confidence=float(confidence),
-        keywords=tuple(k.lower() for k in keywords),
-        paths=tuple(p.lower() for p in paths),
+        keywords=keywords,
+        paths=paths,
     )
 
 

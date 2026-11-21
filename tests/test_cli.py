@@ -144,11 +144,17 @@ def test_entropy_hex_option_is_passed_to_the_detector(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "option", [["--entropy-base64-threshold", "7"], ["--entropy-hex-threshold", "0"]]
+    "option",
+    [
+        ["--entropy-base64-threshold", "7"],
+        ["--entropy-hex-threshold", "0"],
+        ["--entropy-min-length", "0"],
+    ],
 )
 def test_out_of_range_entropy_option_is_rejected(tmp_path: Path, option: list[str]) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path), *option])
     assert result.exit_code == 2
+    assert "Error:" in result.output
 
 
 def test_scan_flags_unquoted_secret_in_env_file(tmp_path: Path) -> None:
