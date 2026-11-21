@@ -188,15 +188,16 @@ def scan(
         findings, stats = result.findings, result.stats
     filtered = file_config.allowlist.apply(findings)
     findings = filtered.kept
-    rescored = model.rescore(findings) if model else None
-    if rescored:
+    rescored = None
+    if model is not None:
+        rescored = model.rescore(findings)
         findings = rescored.kept
     _print_findings(findings)
 
     if file_config.source is not None:
         console.print(f"\nConfig: {_safe(str(file_config.source))}")
     console.print(_summary(stats) + _suppressed(filtered))
-    if model and rescored:
+    if model is not None and rescored is not None:
         console.print(
             f"{rescored.dropped} finding(s) below the classifier threshold "
             f"{model.threshold:.2f} dropped."

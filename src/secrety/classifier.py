@@ -108,10 +108,8 @@ def load_classifier(path: Path | None = None, threshold: float | None = None) ->
     """
     name = str(path) if path is not None else f"secrety/{_PACKAGED_MODEL}"
     try:
-        if path is None:
-            text = files("secrety").joinpath(_PACKAGED_MODEL).read_text(encoding="utf-8")
-        else:
-            text = path.read_text(encoding="utf-8")
+        source = files("secrety").joinpath(_PACKAGED_MODEL) if path is None else path
+        text = source.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise ClassifierError(f"{name}: cannot be read: {exc}") from exc
     try:

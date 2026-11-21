@@ -143,6 +143,8 @@ def inline_ignored(finding: Finding) -> bool:
     known format overlapping it must be. A malformed marker (``[`` never
     closed) ignores nothing: a typo must not widen the suppression.
     """
+    if "secrety:ignore" not in finding.line_content.lower():
+        return False
     needed = {finding.rule_id.lower()} | {
         rule_id.lower()
         for rule_id, method in finding.also_matched

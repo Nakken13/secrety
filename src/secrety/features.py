@@ -18,7 +18,7 @@ import re
 import string
 from pathlib import PurePosixPath
 
-from secrety.detectors.entropy import shannon_entropy
+from secrety.detectors.entropy import HEX_CHARS, shannon_entropy
 from secrety.models import DetectionMethod, Finding
 
 FEATURE_NAMES: tuple[str, ...] = (
@@ -42,7 +42,6 @@ FEATURE_NAMES: tuple[str, ...] = (
     "prior_confidence",
 )
 
-_HEX = frozenset(string.hexdigits)
 _ALNUM = frozenset(string.ascii_letters + string.digits)
 _BASE64 = _ALNUM | frozenset("+/=-_")
 
@@ -105,7 +104,7 @@ def _charset(secret: str) -> str:
     chars = set(secret)
     if not chars:
         return "other"
-    if chars <= _HEX:
+    if chars <= HEX_CHARS:
         return "hex"
     if chars <= _ALNUM:
         return "alnum"
@@ -142,7 +141,7 @@ def extract(finding: Finding) -> tuple[float, ...]:
         "entropy": shannon_entropy(secret),
         "log_length": math.log(n),
         "digit_ratio": sum(c.isdigit() for c in secret) / n,
-        "mixed_case": float(secret != secret.lower() and secret != secret.upper()),
+        "mixed_case": float(secret != lowered and secret != secret.upper()),
         "charset_hex": float(charset == "hex"),
         "charset_alnum": float(charset == "alnum"),
         "charset_base64": float(charset == "base64"),

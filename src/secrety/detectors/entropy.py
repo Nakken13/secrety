@@ -29,7 +29,7 @@ def _token_pattern(min_length: int) -> re.Pattern[str]:
     return re.compile(rf"[A-Za-z0-9+/_\-]{{{min_length},}}={{0,2}}")
 
 
-_HEX_CHARS = frozenset(string.hexdigits)
+HEX_CHARS = frozenset(string.hexdigits)
 
 # Entropy alone is a weak signal: findings stay below most regex rules.
 _MIN_CONFIDENCE = 0.3
@@ -67,7 +67,7 @@ def iter_candidates(line: str, min_length: int) -> Iterator[tuple[int, str, Char
         token = match.group()
         if token.isdigit():
             continue
-        charset = Charset.HEX if _HEX_CHARS.issuperset(token) else Charset.BASE64
+        charset = Charset.HEX if HEX_CHARS.issuperset(token) else Charset.BASE64
         yield match.start(), token, charset
 
 

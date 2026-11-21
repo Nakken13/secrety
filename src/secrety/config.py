@@ -114,10 +114,9 @@ def _parse_allowlist(data: dict[str, Any], path: Path) -> Allowlist:
     paths = section.get("paths", [])
     if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
         raise ConfigError(f"{path}: allowlist.paths must be a list of strings (globs)")
-    use_defaults = section.get("use_defaults", True)
-    if not isinstance(use_defaults, bool):
-        raise ConfigError(f"{path}: allowlist.use_defaults must be true or false")
-    inline_ignore = section.get("inline_ignore", True)
-    if not isinstance(inline_ignore, bool):
-        raise ConfigError(f"{path}: allowlist.inline_ignore must be true or false")
-    return Allowlist(paths=tuple(paths), use_defaults=use_defaults, inline_ignore=inline_ignore)
+    flags = {}
+    for key in ("use_defaults", "inline_ignore"):
+        flags[key] = section.get(key, True)
+        if not isinstance(flags[key], bool):
+            raise ConfigError(f"{path}: allowlist.{key} must be true or false")
+    return Allowlist(paths=tuple(paths), **flags)
