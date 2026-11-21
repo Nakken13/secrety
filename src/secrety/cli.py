@@ -15,11 +15,14 @@ from secrety import __version__
 from secrety.allowlist import FilterResult
 from secrety.classifier import load_classifier
 from secrety.config import (
+    CONFIG_FILE_NAME,
     DEFAULT_BASE64_THRESHOLD,
     DEFAULT_HEX_THRESHOLD,
     DEFAULT_MIN_LENGTH,
     EntropyConfig,
+    FileConfig,
     load_file_config,
+    parse_file_config,
 )
 from secrety.detectors import Detector, EntropyDetector, RegexDetector
 from secrety.models import Finding
@@ -28,6 +31,7 @@ from secrety.rules import load_rules, unbounded_rule_warnings
 from secrety.scanner import scan as run_scan
 from secrety.sources import FilesystemSource, ScanStats
 from secrety.sources.filesystem import DEFAULT_MAX_FILE_SIZE
+from secrety.sources.staged import StagedSource, repo_root, staged_file_text
 
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
@@ -109,6 +113,21 @@ def scan(
             "uncommitted changes are not scanned).",
         ),
     ] = False,
+    staged: Annotated[
+        bool,
+        typer.Option(
+            "--staged",
+            help="Scan only the content staged in the Git index (pre-commit use), for the "
+            "repository that contains PATH. Paths are reported relative to the repository "
+            "root and its .secrety.toml applies.",
+        ),
+    ] = False,
+    exit_zero: Annotated[
+        bool,
+        typer.Option(
+            "--exit-zero", help="Exit 0 even when secrets are found (errors still exit 2)."
+        ),
+    ] = False,
     max_commits: Annotated[
         int | None, typer.Option(min=1, help="With --git: scan only the N newest commits.")
     ] = None,
@@ -153,10 +172,13 @@ def scan(
 ) -> None:
     """Scan PATH for exposed secrets.
 
-    Exit code: 0 if nothing is found, 1 if secrets are found, 2 on error.
+    Exit code: 0 if nothing is found (or with --exit-zero), 1 if secrets are
+    found, 2 on error.
     """
     # Chosen first: nothing but the report may reach stdout in a json/sarif run.
     info = console if output_format is OutputFormat.TEXT and output is None else _stderr_console
+    if staged and git_history:
+        _fail("--staged and --git cannot be combined.")
     if not git_history and (max_commits is not None or since is not None):
         _fail("--max-commits and --since need --git.")
     if classifier_threshold is not None and not classifier:
@@ -168,7 +190,14 @@ def scan(
             hex_threshold=entropy_hex_threshold,
             min_length=entropy_min_length,
         )
-        file_config = load_file_config(config, path)
+        if staged and config is None:
+            root = repo_root(path)
+            text = staged_file_text(root, CONFIG_FILE_NAME)
+            file_config = (
+                FileConfig() if text is None else parse_file_config(text, root / CONFIG_FILE_NAME)
+            )
+        else:
+            file_config = load_file_config(config, path)
         model = load_classifier(threshold=classifier_threshold) if classifier else None
     except ValueError as exc:
         _fail(str(exc), exc)
@@ -179,7 +208,15 @@ def scan(
     if git_history:
         findings, stats = _scan_history(path, detectors, max_file_size, max_commits, since, info)
     else:
-        result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
+        source = (
+            StagedSource(path, max_file_size=max_file_size)
+            if staged
+            else FilesystemSource(path, max_file_size=max_file_size)
+        )
+        try:
+            result = run_scan(source, detectors)
+        except ValueError as exc:  # git failed while reading the index
+            _fail(str(exc), exc)
         findings, stats = result.findings, result.stats
     filtered = file_config.allowlist.apply(findings)
     findings = filtered.kept
@@ -204,7 +241,7 @@ def scan(
             )
     if findings:
         info.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
-        raise typer.Exit(EXIT_FINDINGS)
+        raise typer.Exit(0 if exit_zero else EXIT_FINDINGS)
     info.print("[green]No secret found.[/green]")
 
 

@@ -1,0 +1,8 @@
+- id: secrety
+  name: secrety (secret scan of staged changes)
+  description: Block a commit that adds an exposed secret.
+  entry: secrety scan --staged
+  language: python
+  # Scans the index itself, so pre-commit must not pass file names.
+  pass_filenames: false
+  always_run: true

@@ -89,12 +89,23 @@ def load_file_config(explicit: Path | None, scan_path: Path) -> FileConfig:
             return FileConfig()
         path = candidate
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError) as exc:
         raise ConfigError(f"{path}: cannot be read: {exc}") from exc
+    return parse_file_config(text, path)
+
+
+def parse_file_config(text: str, source: Path) -> FileConfig:
+    """Parse the TOML ``text`` of a settings file; ``source`` names it in errors.
+
+    Raises:
+        ConfigError: ``text`` is not valid TOML or does not match the schema.
+    """
+    try:
+        data = tomllib.loads(text.removeprefix("﻿"))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"{path}: not valid TOML: {exc}") from exc
-    return FileConfig(allowlist=_parse_allowlist(data, path), source=path)
+        raise ConfigError(f"{source}: not valid TOML: {exc}") from exc
+    return FileConfig(allowlist=_parse_allowlist(data, source), source=source)
 
 
 def _parse_allowlist(data: dict[str, Any], path: Path) -> Allowlist:

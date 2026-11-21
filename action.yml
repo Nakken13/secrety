@@ -1,0 +1,83 @@
+name: secrety
+description: Scan the repository for exposed secrets, with optional SARIF upload to code scanning.
+author: Nakken13
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: File or folder to scan.
+    default: "."
+  config:
+    description: >-
+      Settings file (TOML). Pass one explicitly when scanning untrusted code:
+      otherwise the scanned repository's own .secrety.toml is used and can
+      silence findings.
+    default: ""
+  version:
+    description: >-
+      PyPI version specifier (e.g. "==0.1.0"). Empty installs the code of the action's
+      own tag.
+    default: ""
+  sarif:
+    description: Upload the findings to GitHub code scanning as SARIF ("true" or "false").
+    default: "false"
+  exit-zero:
+    description: Do not fail the job when secrets are found ("true" or "false").
+    default: "false"
+
+outputs:
+  exit-code:
+    description: "secrety exit code: 0 clean, 1 findings, 2 error."
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install secrety
+      shell: bash
+      env:
+        SECRETY_VERSION: ${{ inputs.version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        # No version given: install the code of the tag being used, not whatever PyPI has.
+        if [ -n "$SECRETY_VERSION" ]; then
+          python -m pip install --quiet "secrety${SECRETY_VERSION}"
+        else
+          python -m pip install --quiet "$ACTION_PATH"
+        fi
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        SCAN_CONFIG: ${{ inputs.config }}
+        SCAN_SARIF: ${{ inputs.sarif }}
+        SCAN_EXIT_ZERO: ${{ inputs.exit-zero }}
+      run: |
+        args=("$SCAN_PATH" --format sarif --output "$RUNNER_TEMP/secrety.sarif")
+        if [ -n "$SCAN_CONFIG" ]; then args+=(--config "$SCAN_CONFIG"); fi
+        set +e
+        secrety scan "${args[@]}"
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ -f "$RUNNER_TEMP/secrety.sarif" ]; then echo "sarif-exists=true" >> "$GITHUB_OUTPUT"; fi
+        # Print a readable report too (the SARIF file is for code scanning).
+        if [ "$code" -eq 1 ]; then
+          text_args=("$SCAN_PATH")
+          if [ -n "$SCAN_CONFIG" ]; then text_args+=(--config "$SCAN_CONFIG"); fi
+          secrety scan "${text_args[@]}" || true
+        fi
+        if [ "$code" -eq 1 ] && [ "$SCAN_EXIT_ZERO" = "true" ]; then code=0; fi
+        exit "$code"
+    - name: Upload SARIF
+      if: ${{ always() && inputs.sarif == 'true' && steps.scan.outputs.sarif-exists == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ runner.temp }}/secrety.sarif
+        category: secrety
