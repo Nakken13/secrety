@@ -49,7 +49,7 @@ def test_location_without_commit() -> None:
 
 
 def test_location_with_commit_uses_short_sha() -> None:
-    finding = make_finding(commit="0123456789abcdef0123")
+    finding = make_finding(commit="0123456789" + "abcdef0123")
     assert finding.location == "0123456789ab:config/settings.py:12:9"
 
 

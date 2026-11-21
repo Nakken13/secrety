@@ -19,12 +19,13 @@ RULE_ID = "generic-password-unquoted"
 _CONFIDENCE = 0.4  # same prior as the quoted generic rule
 _CONFIG_SUFFIXES = (".env", ".ini", ".cfg", ".conf", ".properties", ".yaml", ".yml")
 
-# key, optional ``export``, ``=`` or ``:``, then a value of 8 to 256 non-space
+# optional YAML list marker (``- KEY=value`` in docker-compose), optional
+# ``export``, key, ``=`` or ``:``, then a value of 8 to 256 non-space
 # characters. A value starting with ``$ < { %`` is a reference or a template
 # (``${VAR}``, ``<your-password>``, ``{{ var }}``, ``%(var)s``); a quote means
 # the regex rule handles it. Every quantifier is bounded.
 _ASSIGNMENT = re.compile(
-    r"(?i)^\s{0,16}(?:export\s{1,8})?[\w.\-]{0,32}?"
+    r"(?i)^\s{0,16}(?:-\s{1,8})?(?:export\s{1,8})?[\w.\-]{0,32}?"
     r"(?:password|passwd|pwd|secret|api_?key|access_?token|auth_?token)"
     r"[\w.\-]{0,32}\s{0,16}[:=]\s{0,16}"
     r"([^\s\"'$<{%#][^\s\"']{7,255})(?=\s|$)"

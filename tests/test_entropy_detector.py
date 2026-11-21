@@ -36,17 +36,17 @@ def test_entropy_is_capped_by_length() -> None:
 
 
 def test_candidate_hex_token_is_classified_hex() -> None:
-    line = "digest = 0123456789abcdef0123456789abcdef"
+    line = f"digest = {fakes.HIGH_ENTROPY_HEX}"
     [(column, token, charset)] = iter_candidates(line, min_length=20)
-    assert token == "0123456789abcdef0123456789abcdef"
+    assert token == fakes.HIGH_ENTROPY_HEX
     assert column == line.index(token)
     assert charset is Charset.HEX
 
 
 def test_candidate_base64_token_keeps_padding() -> None:
-    line = 'key: "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo+/w=="'
-    [(_, token, charset)] = iter_candidates(line, min_length=20)
-    assert token == "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo+/w=="
+    padded = fakes.HIGH_ENTROPY_BASE64 + "+/w=="
+    [(_, token, charset)] = iter_candidates(f'key: "{padded}"', min_length=20)
+    assert token == padded
     assert charset is Charset.BASE64
 
 

@@ -32,6 +32,8 @@ def test_code_files_are_not_config_files(path: str) -> None:
         (".env.local", f"SECRET_KEY = {PW}  # rotated monthly"),
         ("config.yml", f"  password: {PW}"),
         ("app.ini", f"auth_token : {PW}"),
+        ("docker-compose.yml", f"      - DB_PASSWORD={PW}"),
+        ("config.yaml", f"  - password: {PW}"),
     ],
 )
 def test_unquoted_secret_in_config_file_is_flagged(path: str, line: str) -> None:

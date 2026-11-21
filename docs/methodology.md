@@ -35,8 +35,10 @@ Two upper bounds limit what can be flagged:
 
 Each line is cut into maximal runs of base64 characters `[A-Za-z0-9+/_-]`,
 optionally followed by `=` padding. The URL-safe characters `-` and `_` are
-included so that URL-safe keys and JWT segments stay in one piece. Every other
-character ends a token: quotes, spaces, `=`, `:` and `.`. A token is kept when:
+included so that URL-safe keys and JWT segments stay in one piece. Any other
+character ends a token: quotes, spaces, `:`, `.`, and `=` past the first two
+(which are taken as padding, so in `KEY=value` the token is `KEY=`). A token is
+kept when:
 
 - it is at least `min_length` characters long (default 20);
 - it is not made only of decimal digits (timestamps, IDs, phone numbers).
@@ -70,6 +72,8 @@ get_password()`). In config files (`.env*`, `.yml`/`.yaml`, `.ini`, `.cfg`,
 `.conf`, `.properties`), values are plain text. A dedicated detector flags
 `KEY=value` and `key: value` lines there when:
 
+- the line starts with the key (after indentation, an optional YAML list
+  marker `- ` and an optional `export`);
 - the key contains `password`, `passwd`, `pwd`, `secret`, `api_key`,
   `access_token` or `auth_token`;
 - the value is 8 to 256 non-space characters;
@@ -95,6 +99,12 @@ one finding:
 The other findings are recorded in `Finding.also_matched`, and
 `Finding.methods` lists every method that fired.
 
+Entropy can win a group. `password = "<32 hex digits>"` is reported as
+`high-entropy-hex` (about 0.6) rather than `generic-password-assignment`
+(0.4), and the generic rule appears in `also_matched`. When the value holds
+characters outside base64 (`!`, `@`...), the entropy finding covers only part
+of the value, so the reported `secret` is that fragment.
+
 ## Known weaknesses
 
 - **Short secrets are invisible to entropy.** See the length bound above.
@@ -109,6 +119,8 @@ The other findings are recorded in `Finding.also_matched`, and
   `github.com/python/cpython/blob/<sha>` look random to the formula.
 - **Character frequency only.** `H` ignores order, so `abcdabcd...` scores like
   a random string of the same letters.
+- **No upper length.** A one-line data URI or an embedded notebook image is a
+  single huge token, so it gives one finding whose masked value is just as long.
 - **Line by line.** A secret split across lines (a multi-line PEM body, a
   string concatenation) is seen in pieces, or missed.
 - **Unquoted detection depends on file names.** A config file with an unusual
