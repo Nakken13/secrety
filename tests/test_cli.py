@@ -109,3 +109,49 @@ def test_summary_reports_unreadable_paths(tmp_path: Path, monkeypatch: pytest.Mo
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert result.exit_code == 0
     assert "1 path(s) could not be read" in result.output
+
+
+def test_scan_runs_entropy_detection_by_default(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(f'k = "{fakes.HIGH_ENTROPY_BASE64}"\n', encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "high-entropy-base64" in result.output
+    assert fakes.HIGH_ENTROPY_BASE64 not in result.output
+
+
+def test_scan_merges_regex_and_entropy_findings(tmp_path: Path) -> None:
+    (tmp_path / "config.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert "1 potential secret(s) found" in result.output
+    assert "github-token" in result.output
+
+
+def test_entropy_options_are_passed_to_the_detector(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(f'k = "{fakes.HIGH_ENTROPY_BASE64}"\n', encoding="utf-8")
+    strict = ["--entropy-base64-threshold", "5.5", "--entropy-hex-threshold", "4"]
+    assert runner.invoke(app, ["scan", str(tmp_path), *strict]).exit_code == 0
+    long_only = ["--entropy-min-length", "60"]
+    assert runner.invoke(app, ["scan", str(tmp_path), *long_only]).exit_code == 0
+
+
+@pytest.mark.parametrize(
+    "option", [["--entropy-base64-threshold", "7"], ["--entropy-hex-threshold", "0"]]
+)
+def test_out_of_range_entropy_option_is_rejected(tmp_path: Path, option: list[str]) -> None:
+    result = runner.invoke(app, ["scan", str(tmp_path), *option])
+    assert result.exit_code == 2
+
+
+def test_scan_flags_unquoted_secret_in_env_file(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(f"DB_PASSWORD={fakes.ENV_PASSWORD}\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "generic-password-unquoted" in result.output
+
+
+def test_location_is_not_read_as_an_emoji_code(tmp_path: Path) -> None:
+    # Rich turns ":100:" into an emoji: "a.env:100:4" must stay as is.
+    text = "\n" * 99 + f"GH={fakes.GITHUB_TOKEN}\n"
+    (tmp_path / "a.env").write_text(text, encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert "a.env:100:4" in result.output

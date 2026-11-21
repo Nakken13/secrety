@@ -2,3 +2,4 @@
 
 Tasks in progress. Done → delete + `crew/CLAUDE_CONTEXT/HISTORY.md` entry + `crew/TESTS/<chantier>.md`.
 
+- [02 Entropy detection](02-entropy-detection.md)

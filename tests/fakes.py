@@ -36,8 +36,14 @@ SLACK_APP_TOKEN = "xapp" + "-1-AFAKE0000-" + pad("0000FAKE", 30)
 SLACK_ROTATING_TOKEN = "xoxe" + "-1-" + pad("FAKErotating", 40)
 DH_PRIVATE_KEY_HEADER = "-----BEGIN " + "DH PRIVATE KEY-----"
 PUTTY_KEY_HEADER = "PuTTY-User-Key-File-" + "3: ssh-ed25519"
+# Random-looking values with no provider format, for the entropy detector.
+HIGH_ENTROPY_BASE64 = "FAKE" + "aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zLc"
+HIGH_ENTROPY_HEX = "0123456789abcdef" + "fedcba9876543210"
+ENV_PASSWORD = "FAKE!pa55-EXAMPLE"
 
-# Key-file headers are fixed strings with no key material: no FAKE marker
-# fits in them. Listed here, next to the values, so a new header is exempted
-# where it is declared.
-UNMARKABLE = frozenset({"PRIVATE_KEY_HEADER", "DH_PRIVATE_KEY_HEADER", "PUTTY_KEY_HEADER"})
+# Key-file headers are fixed strings with no key material, and hex digits
+# stop at "f": no FAKE marker fits in them. Listed here, next to the values,
+# so a new exemption is made where the value is declared.
+UNMARKABLE = frozenset(
+    {"PRIVATE_KEY_HEADER", "DH_PRIVATE_KEY_HEADER", "PUTTY_KEY_HEADER", "HIGH_ENTROPY_HEX"}
+)

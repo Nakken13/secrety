@@ -8,7 +8,15 @@ from rich.console import Console
 from rich.markup import escape
 
 from secrety import __version__
-from secrety.detectors import RegexDetector
+from secrety.config import (
+    DEFAULT_BASE64_THRESHOLD,
+    DEFAULT_HEX_THRESHOLD,
+    DEFAULT_MIN_LENGTH,
+    MAX_BASE64_ENTROPY,
+    MAX_HEX_ENTROPY,
+    EntropyConfig,
+)
+from secrety.detectors import EntropyDetector, RegexDetector, UnquotedAssignmentDetector
 from secrety.models import Finding
 from secrety.rules import RuleError, load_rules
 from secrety.scanner import scan as run_scan
@@ -24,7 +32,8 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-console = Console(highlight=False, soft_wrap=True)
+# emoji=False: a location such as "a.py:100:3" would print ":100:" as an emoji.
+console = Console(highlight=False, soft_wrap=True, emoji=False)
 
 
 def _version_callback(value: bool) -> None:
@@ -76,6 +85,25 @@ def scan(
     max_file_size: Annotated[
         int, typer.Option(min=1, help="Skip files larger than this many bytes.")
     ] = DEFAULT_MAX_FILE_SIZE,
+    entropy_base64_threshold: Annotated[
+        float,
+        typer.Option(
+            min=0.0,
+            max=MAX_BASE64_ENTROPY,
+            help="Minimum entropy (bits/char) to flag a base64 token.",
+        ),
+    ] = DEFAULT_BASE64_THRESHOLD,
+    entropy_hex_threshold: Annotated[
+        float,
+        typer.Option(
+            min=0.0,
+            max=MAX_HEX_ENTROPY,
+            help="Minimum entropy (bits/char) to flag a hex token.",
+        ),
+    ] = DEFAULT_HEX_THRESHOLD,
+    entropy_min_length: Annotated[
+        int, typer.Option(min=1, help="Shortest token checked for entropy.")
+    ] = DEFAULT_MIN_LENGTH,
 ) -> None:
     """Scan PATH for exposed secrets.
 
@@ -87,9 +115,21 @@ def scan(
         console.print(f"[red]Error:[/red] {escape(str(exc))}")
         raise typer.Exit(EXIT_ERROR) from exc
 
-    result = run_scan(
-        FilesystemSource(path, max_file_size=max_file_size), [RegexDetector(loaded_rules)]
-    )
+    try:
+        entropy = EntropyConfig(
+            base64_threshold=entropy_base64_threshold,
+            hex_threshold=entropy_hex_threshold,
+            min_length=entropy_min_length,
+        )
+    except ValueError as exc:  # a threshold of exactly 0, which typer lets through
+        console.print(f"[red]Error:[/red] {escape(str(exc))}")
+        raise typer.Exit(EXIT_ERROR) from exc
+    detectors = [
+        RegexDetector(loaded_rules),
+        UnquotedAssignmentDetector(),
+        EntropyDetector(entropy),
+    ]
+    result = run_scan(FilesystemSource(path, max_file_size=max_file_size), detectors)
     _print_findings(result.findings)
 
     console.print(_summary(result.stats))

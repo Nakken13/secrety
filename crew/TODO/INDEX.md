@@ -2,7 +2,6 @@
 
 Tasks not started yet. Start = move the file to `crew/CURRENT_TASKS/` (see `CLAUDE.md`).
 
-- [02 Entropy detection](02-entropy-detection.md)
 - [03 Git history scan](03-git-history-scan.md)
 - [04 False-positive reduction and classifier](04-false-positive-reduction.md)
 - [05 Output formats](05-outputs.md)

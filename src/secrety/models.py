@@ -33,6 +33,9 @@ class Finding:
         method: Detection method that produced this finding.
         confidence: Score in ``[0, 1]``; higher means more likely a real secret.
         commit: Commit SHA when the finding comes from Git history, else ``None``.
+        also_matched: ``(rule_id, method)`` of the other findings merged into
+            this one because they flagged the same place (see
+            :func:`secrety.scanner.merge_duplicates`).
     """
 
     rule_id: str
@@ -45,6 +48,7 @@ class Finding:
     method: DetectionMethod
     confidence: float
     commit: str | None = None
+    also_matched: tuple[tuple[str, DetectionMethod], ...] = ()
 
     def __post_init__(self) -> None:
         """Validate invariants that every consumer relies on."""
@@ -65,6 +69,11 @@ class Finding:
             return "*" * n
         edge = min(_MAX_VISIBLE_EDGE, n // 8)
         return f"{self.secret[:edge]}{'*' * (n - 2 * edge)}{self.secret[-edge:]}"
+
+    @property
+    def methods(self) -> tuple[DetectionMethod, ...]:
+        """Every method that flagged this place, the reported one first."""
+        return tuple(dict.fromkeys([self.method, *(m for _, m in self.also_matched)]))
 
     @property
     def location(self) -> str:
