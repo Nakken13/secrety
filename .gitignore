@@ -52,6 +52,7 @@ htmlcov/
 
 # Evaluation: corpus is generated at runtime, never committed (fake secrets
 # would still trip GitHub push protection)
-evaluation/corpus/
+evaluation/corpora/
 evaluation/results/raw/
 crew/CLAUDE_CONTEXT/BATCH_LOCKS.md
+evaluation/tools/

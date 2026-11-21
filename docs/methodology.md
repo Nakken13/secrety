@@ -58,8 +58,8 @@ threshold proportionate to its maximum:
 | hex | 4.0 | 3.0 | `--entropy-hex-threshold` |
 
 `--entropy-min-length` sets the shortest token. The defaults are the usual
-starting points (TruffleHog, detect-secrets). Task 07 tunes them on a
-labelled corpus. Confidence grows linearly from 0.3 at the threshold to 0.6 at
+starting points (TruffleHog, detect-secrets). They were not re-tuned on the
+evaluation corpus (see `docs/results/`). Confidence grows linearly from 0.3 at the threshold to 0.6 at
 the charset maximum, so entropy findings stay below most regex rules.
 
 This confidence is not comparable across charsets. Hex reaches its 4-bit
@@ -151,8 +151,9 @@ summary prints the counts: nothing is hidden silently.
    threshold (`--classifier-threshold`, default from the model) are dropped.
    The model is versioned JSON evaluated in pure Python: no pickle is loaded
    and scikit-learn is not needed at runtime (see
-   `docs/decisions/0001-classifier-format.md`). Until the evaluation trains
-   it, the packaged model is a hand-set stub and the CLI says so.
+   `docs/decisions/0001-classifier-format.md`). The packaged model is trained
+   on a synthetic corpus (`python -m evaluation.train`); its metrics and
+   limits are in `docs/results/`.
 
 Custom rules (`--rules`) are checked for unbounded quantifiers (`+`, `*`,
 `{n,}`), which can backtrack for a long time on a long line. The bundled
@@ -169,18 +170,24 @@ rules bound every repetition, and a test keeps it that way.
   can hold a private key), so add them to `.secrety.toml` when needed.
 - **Hex hashes.** Git SHAs, checksums and SHA-256 digests (about 3.7 bits)
   exceed the hex threshold (3.0). Outside lockfiles, only the trained
-  classifier (task 07) can tell them apart.
+  classifier can tell them apart (it drops them all on the synthetic test
+  corpus).
 - **Allowlisted paths are trusted.** A real secret committed under `tests/`
   or in an allowlisted folder is not reported, only counted. `.secrety.toml`
   is read from the scanned repository, so whoever controls the repository
   controls what is skipped: a CI scan of untrusted code should pass its own
   `--config` (which replaces the repository's file).
-- **The stub classifier is not evidence.** Its weights are hand-set: use
-  `--classifier` for triage, not as a gate, until task 07 publishes metrics.
-  Its `value_placeholder` feature fires on `FAKE` and `EXAMPLE`, the very
-  markers the repository's fake values must carry: task 07 has to settle that
-  conflict (drop those words from the feature, or keep them out of the
-  runtime-generated corpus) before training.
+- **The classifier is trained on synthetic data.** Its scores in
+  `docs/results/` come from a generated corpus, not from real repositories:
+  they rank the configurations against each other, they do not predict the
+  false-positive rate on your code. Use `--classifier` for triage, not as a
+  gate. Look-alikes it never saw are not always dropped (an SSH public key is,
+  see the held-out families in `docs/results/results.md`).
+- **Fake markers count as placeholders.** The `value_placeholder` feature
+  fires on `fake`, `example`, `dummy`... in the value, so a *marked* fake
+  secret (`ghp_FAKE...`) is rated as a decoy and dropped. That is wanted for
+  real placeholders, and it is why the evaluation corpus keeps markers out of
+  the values (see `docs/results/README.md`).
 - **Alphabet literals and URL paths.** `"ABC...xyz0123456789"` or
   `github.com/python/cpython/blob/<sha>` look random to the formula.
 - **Character frequency only.** `H` ignores order, so `abcdabcd...` scores like

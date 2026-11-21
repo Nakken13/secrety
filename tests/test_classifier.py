@@ -116,14 +116,14 @@ def test_threshold_override_out_of_range(tmp_path: Path, threshold: float) -> No
 # --- packaged model -------------------------------------------------------
 
 
-def test_packaged_model_loads_and_is_a_stub() -> None:
+def test_packaged_model_loads_and_is_trained() -> None:
     model = load_classifier()
     assert isinstance(model, Classifier)
-    assert model.stub
+    assert not model.stub
     assert 0.0 <= model.probability(make_finding()) <= 1.0
 
 
-def test_packaged_stub_ranks_obvious_cases() -> None:
+def test_packaged_model_ranks_obvious_cases() -> None:
     model = load_classifier()
     real = make_finding(secret="aB3dE5gH7jK9mN1pQ2rS4tUv", path="deploy/.env")
     placeholder = make_finding(secret="your-api-key-here-0000", path="README.md")

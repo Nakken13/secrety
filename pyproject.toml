@@ -37,6 +37,10 @@ dev = [
     "ruff>=0.6",
     "jsonschema>=4.20",
 ]
+eval = [
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+]
 
 [project.scripts]
 secrety = "secrety.cli:app"  # secrety:ignore[generic-password-assignment]
@@ -68,11 +72,12 @@ convention = "google"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers --cov=secrety --cov-report=term-missing --cov-fail-under=80"
+pythonpath = ["."]
+addopts = "--strict-markers --cov=secrety --cov=evaluation --cov-report=term-missing --cov-fail-under=80"
 
 [tool.coverage.run]
 branch = true
-source = ["secrety"]
+source = ["secrety", "evaluation"]
 
 [tool.pyright]
 venvPath = "."

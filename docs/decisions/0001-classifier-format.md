@@ -70,8 +70,9 @@ No `jsonschema` dependency: the validator is hand-written.
 - The model has to stay linear. Feature crosses are computed in
   `features.py`; a non-linear model means a new `model_type` or
   `schema_version: 2` (option D stays open if task 07 shows a real gain).
-- Task 04 ships a hand-set stub (`"stub": true`). Task 07 adds
-  `evaluation/export_model.py`, which imports `FEATURE_NAMES` and checks that
-  the pure-Python scores match sklearn's `predict_proba` to 1e-9.
+- Task 04 shipped a hand-set stub (`"stub": true`). Task 07 added
+  `evaluation/export_model.py`, which imports `FEATURE_NAMES`; a test checks
+  that the pure-Python scores match sklearn's `predict_proba` to 1e-9. The
+  packaged model is now trained (`"stub": false`).
 - Any change to `FEATURE_NAMES` requires retraining and re-exporting; check 3
   enforces it.

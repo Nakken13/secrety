@@ -1,3 +1,5 @@
+import random
+import string
 import subprocess
 import sys
 from pathlib import Path
@@ -314,15 +316,27 @@ def test_classifier_is_off_by_default(tmp_path: Path) -> None:
     assert "classifier" not in result.output
 
 
+def unmarked_github_token() -> str:
+    """A token-shaped value with no FAKE/EXAMPLE marker, built at runtime (never a literal).
+
+    The trained classifier reads those markers as placeholders and drops the
+    finding, which is what it should do; this test needs a finding that stays.
+    """
+    rng = random.Random(0)
+    return (
+        "ghp" + "_" + "".join(rng.choice(string.ascii_letters + string.digits) for _ in range(36))
+    )
+
+
 def test_classifier_drops_placeholders_and_rescores(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text('api_key = "your-api-key-here-0000"\n', encoding="utf-8")
-    (tmp_path / "prod.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    (tmp_path / "prod.env").write_text(f"GH={unmarked_github_token()}\n", encoding="utf-8")
     result = runner.invoke(app, ["scan", str(tmp_path), "--classifier"])
     assert result.exit_code == 1
     assert "prod.env:1:4" in result.output
     assert "README.md" not in result.output
     assert "1 finding(s) below the classifier threshold 0.50 dropped" in result.output
-    assert "untrained stub" in result.output
+    assert "untrained stub" not in result.output
 
 
 def test_classifier_threshold_option(tmp_path: Path) -> None:
