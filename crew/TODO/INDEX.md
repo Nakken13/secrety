@@ -2,7 +2,6 @@
 
 Tasks not started yet. Start = move the file to `crew/CURRENT_TASKS/` (see `CLAUDE.md`).
 
-- [04 False-positive reduction and classifier](04-false-positive-reduction.md)
 - [05 Output formats](05-outputs.md)
 - [06 Integration: pre-commit, staged mode, GitHub Action](06-integration.md)
 - [07 Evaluation and benchmark](07-evaluation.md)
