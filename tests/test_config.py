@@ -94,3 +94,9 @@ def test_invalid_config_is_rejected_with_the_file_name(
 
 def test_config_error_is_a_value_error() -> None:
     assert issubclass(ConfigError, ValueError)
+
+
+def test_config_file_with_utf8_bom_is_read(tmp_path: Path) -> None:
+    # PowerShell 5.1 writes UTF-8 with a byte-order mark.
+    (tmp_path / CONFIG_FILE_NAME).write_bytes(b'\xef\xbb\xbf[allowlist]\npaths = ["x/**"]\n')
+    assert load_file_config(None, tmp_path).allowlist.paths == ("x/**",)

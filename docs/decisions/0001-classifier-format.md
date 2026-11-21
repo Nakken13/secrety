@@ -50,6 +50,8 @@ Schema (version 1):
 Checks on load, each failure a `ClassifierError` (a `ValueError`, exit code 2
 like a bad rules file):
 
+0. The top level is an object with exactly the keys above: a missing or
+   unknown key (a typo such as `coeff`) fails.
 1. `schema_version` is supported; an unknown version fails, it is never guessed.
 2. `model_type` is `logistic_regression`.
 3. `feature_names` equals `secrety.features.FEATURE_NAMES` exactly (same order),

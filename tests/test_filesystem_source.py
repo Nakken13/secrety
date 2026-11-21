@@ -225,3 +225,20 @@ def test_skipped_symlinks_are_counted(tmp_path: Path) -> None:
     source = FilesystemSource(root)
     assert paths(source) == []
     assert source.stats.skipped_links == 2
+
+
+def test_file_links_are_counted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Creating a real symlink needs a privilege on Windows: fake lstat instead.
+    write(tmp_path, "a.txt", "a")
+    write(tmp_path, "link.txt", "b")
+    real_lstat = os.lstat
+
+    def fake_lstat(path: os.PathLike[str] | str) -> os.stat_result:
+        if Path(path).name == "link.txt":
+            return fake_stat(stat.S_IFLNK)
+        return real_lstat(path)
+
+    monkeypatch.setattr(os, "lstat", fake_lstat)
+    source = FilesystemSource(tmp_path)
+    assert paths(source) == ["a.txt"]
+    assert source.stats.skipped_links == 1

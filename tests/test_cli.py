@@ -262,7 +262,7 @@ def test_findings_in_allowed_paths_are_suppressed_and_counted(tmp_path: Path) ->
 
 def test_inline_ignore_suppresses_a_finding(tmp_path: Path) -> None:
     (tmp_path / "app.env").write_text(
-        f"GH={fakes.GITHUB_TOKEN}  # secrety:ignore[github-token, high-entropy-base64]\n",
+        f"GH={fakes.GITHUB_TOKEN}  # secrety:ignore[github-token]\n",
         encoding="utf-8",
     )
     result = runner.invoke(app, ["scan", str(tmp_path)])

@@ -158,21 +158,22 @@ def test_inline_ignore_not_triggered(line: str) -> None:
     assert not inline_ignored(make_finding(line_content=line))
 
 
-def test_inline_ignore_with_ids_must_cover_every_merged_rule() -> None:
-    # One finding stands for every rule that flagged this place: naming only
-    # one of them must not hide what the others found.
+def test_inline_ignore_with_ids_follows_the_reported_rule() -> None:
+    # Provider tokens nearly always trip entropy too, and the merged finding is
+    # reported under the regex rule: naming that rule must be enough.
     merged = (("high-entropy-base64", DetectionMethod.ENTROPY),)
-    partial = make_finding(
+    reported = make_finding(
         line_content='p = "FAKE-value-EXAMPLE"  # secrety:ignore[generic-password-assignment]',
         also_matched=merged,
     )
-    full = make_finding(
-        line_content='p = "x"  # secrety:ignore[generic-password-assignment,high-entropy-base64]',
+    # Naming only a merged rule does not hide what the reported rule found.
+    merged_only = make_finding(
+        line_content='p = "FAKE-value-EXAMPLE"  # secrety:ignore[high-entropy-base64]',
         also_matched=merged,
     )
     bare = make_finding(line_content='p = "FAKE"  # secrety:ignore', also_matched=merged)
-    assert not inline_ignored(partial)
-    assert inline_ignored(full)
+    assert inline_ignored(reported)
+    assert not inline_ignored(merged_only)
     assert inline_ignored(bare)
 
 

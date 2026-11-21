@@ -139,10 +139,10 @@ summary prints the counts: nothing is hidden silently.
    disable the file.
 2. **Inline ignore.** A line containing `secrety:ignore` is skipped, whatever
    the comment syntax (`#`, `//`, `<!-- -->`...). `secrety:ignore[rule-a,
-   rule-b]` only ignores those rules. Because one reported finding can stand
-   for several rules that flagged the same place (`also:`), the ids must
-   cover all of them: naming `generic-password-assignment` does not hide the
-   `high-entropy-base64` finding on the same value.
+   rule-b]` only ignores findings reported under those rules. Rules merged
+   into a finding (`also:`) flagged the same value, so naming the reported
+   rule is enough; naming only a merged rule (usually `high-entropy-*`) does
+   not hide what a known-format rule found.
 3. **Classifier** (opt-in, `--classifier`). A logistic regression rescores
    each remaining finding from features of the value (entropy, length,
    charset, placeholder words such as `example` or `changeme`), of the name
@@ -177,8 +177,10 @@ rules bound every repetition, and a test keeps it that way.
   `--config` (which replaces the repository's file).
 - **The stub classifier is not evidence.** Its weights are hand-set: use
   `--classifier` for triage, not as a gate, until task 07 publishes metrics.
-  Its `value_placeholder` feature fires on `FAKE`, so the evaluation corpus
-  must not mark its positive samples that way.
+  Its `value_placeholder` feature fires on `FAKE` and `EXAMPLE`, the very
+  markers the repository's fake values must carry: task 07 has to settle that
+  conflict (drop those words from the feature, or keep them out of the
+  runtime-generated corpus) before training.
 - **Alphabet literals and URL paths.** `"ABC...xyz0123456789"` or
   `github.com/python/cpython/blob/<sha>` look random to the formula.
 - **Character frequency only.** `H` ignores order, so `abcdabcd...` scores like

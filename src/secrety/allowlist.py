@@ -101,17 +101,18 @@ def inline_ignored(finding: Finding) -> bool:
     """Return True if the finding's line carries a ``secrety:ignore`` marker.
 
     A bare marker ignores every finding on the line. With rule ids
-    (``secrety:ignore[rule-a,rule-b]``) the finding is ignored only when the
-    ids cover its rule *and* every rule merged into it, so naming one rule
-    never hides what another rule found at the same place.
+    (``secrety:ignore[rule-a,rule-b]``) the finding is ignored when the ids
+    include the rule it is *reported* under. Rules merged into it
+    (:attr:`~secrety.models.Finding.also_matched`) flagged the same span, so
+    they are covered too; naming only a merged rule (typically the entropy
+    one) does not hide what the reported rule, a known format, found.
     """
-    rules = {finding.rule_id, *(rule_id for rule_id, _ in finding.also_matched)}
+    reported = finding.rule_id.lower()
     for match in _IGNORE.finditer(finding.line_content):
         listed = match.group(1)
         if listed is None:
             return True
-        ids = {part.strip().lower() for part in listed.split(",") if part.strip()}
-        if ids and {r.lower() for r in rules} <= ids:
+        if reported in {part.strip().lower() for part in listed.split(",")}:
             return True
     return False
 

@@ -89,7 +89,7 @@ def load_file_config(explicit: Path | None, scan_path: Path) -> FileConfig:
             return FileConfig()
         path = candidate
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeDecodeError) as exc:
         raise ConfigError(f"{path}: cannot be read: {exc}") from exc
     except tomllib.TOMLDecodeError as exc:
