@@ -55,7 +55,30 @@ secrety                                 # interactive menu (banner, numbered cho
 ```
 
 The menu walks you through folder, Git-history and staged scans, shows findings as cards per file
-(secrets masked) and can save a text, JSON or SARIF report. For CI and fine-tuning use `scan`:
+(secrets masked) and can save a text, JSON or SARIF report.
+
+### Interactive menu walkthrough
+
+1. **Launch**: run `secrety` with no arguments. The banner and the **Scan mode** menu appear.
+2. **Pick a mode** by typing its number, then ENTER:
+   - `1` Folder or file: scan files on disk.
+   - `2` Git history: scan every line ever added in the repo.
+   - `3` Staged changes: scan only what is staged (pre-commit check).
+   - `0` About: short description of the tool, then back to the menu.
+   - `q` Quit.
+3. **Answer the prompts**:
+   - `Path`: folder or file to scan; ENTER keeps the default `.` (current directory).
+   - Git history only, `Newest commits to scan`: a whole number, or ENTER for the full history.
+4. **Read the results**: findings are shown as cards grouped by file, with the secret masked,
+   followed by a summary (files scanned, binary and large files skipped). A bad path or a
+   non-repo folder shows an error and returns you to the menu.
+5. **"What now?" submenu**:
+   - `1` Save a report: choose Text, JSON or SARIF, then give an output file name. An existing
+     file is never overwritten.
+   - `2` New scan in the same mode.
+   - `q` Back to the main menu.
+
+The menu uses the default rules and detectors. For CI and fine-tuning use `scan`:
 
 ```bash
 secrety scan .                          # files on disk
