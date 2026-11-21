@@ -302,3 +302,47 @@ def test_git_scan_applies_the_allowlist(git_repo: GitRepo) -> None:
     result = runner.invoke(app, ["scan", str(git_repo.path), "--git"])
     assert result.exit_code == 0
     assert "1 finding(s) suppressed by the path allowlist" in result.output
+
+
+# --- classifier -----------------------------------------------------------
+
+
+def test_classifier_is_off_by_default(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text('api_key = "your-api-key-here-0000"\n', encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "classifier" not in result.output
+
+
+def test_classifier_drops_placeholders_and_rescores(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text('api_key = "your-api-key-here-0000"\n', encoding="utf-8")
+    (tmp_path / "prod.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", str(tmp_path), "--classifier"])
+    assert result.exit_code == 1
+    assert "prod.env:1:4" in result.output
+    assert "README.md" not in result.output
+    assert "1 finding(s) below the classifier threshold 0.50 dropped" in result.output
+    assert "untrained stub" in result.output
+
+
+def test_classifier_threshold_option(tmp_path: Path) -> None:
+    (tmp_path / "prod.env").write_text(f"GH={fakes.GITHUB_TOKEN}\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["scan", str(tmp_path), "--classifier", "--classifier-threshold", "1.0"]
+    )
+    assert result.exit_code == 0
+    assert "threshold 1.00" in result.output
+
+
+def test_classifier_threshold_out_of_range_exits_two(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app, ["scan", str(tmp_path), "--classifier", "--classifier-threshold", "1.5"]
+    )
+    assert result.exit_code == 2
+    assert "threshold" in result.output
+
+
+def test_classifier_threshold_needs_classifier(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(tmp_path), "--classifier-threshold", "0.2"])
+    assert result.exit_code == 2
+    assert "--classifier" in result.output

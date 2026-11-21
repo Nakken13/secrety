@@ -7,8 +7,8 @@ Zone : `src/secrety/allowlist.py`, `src/secrety/features.py`, `src/secrety/class
 - [x] Path allowlist globs (tests, lockfiles, examples) as defaults, overridable via config
 - [x] Inline `# secrety:ignore` (and `secrety:ignore[rule-id]`) honored for any comment style
 - [x] Feature extraction: entropy, length, charset class, variable name tokens, file extension + tests
-- [ ] Classifier inference module per the decision; loads the packaged model; scores each Finding; threshold configurable
-- [ ] Stub model usable in tests until task 07 training; classifier wired into pipeline behind `--classifier` flag
+- [x] Classifier inference module per the decision; loads the packaged model; scores each Finding; threshold configurable
+- [x] Stub model usable in tests until task 07 training; classifier wired into pipeline behind `--classifier` flag
 - [ ] Coverage >= 80%
 
 Carried over from 01 (review / self-scan):

@@ -12,6 +12,7 @@ from rich.markup import escape
 
 from secrety import __version__
 from secrety.allowlist import FilterResult
+from secrety.classifier import load_classifier
 from secrety.config import (
     DEFAULT_BASE64_THRESHOLD,
     DEFAULT_HEX_THRESHOLD,
@@ -145,6 +146,17 @@ def scan(
             help="Settings file (TOML). Default: .secrety.toml at the scanned folder, if any.",
         ),
     ] = None,
+    classifier: Annotated[
+        bool,
+        typer.Option(
+            "--classifier",
+            help="Rescore findings with the packaged model and drop those below its threshold.",
+        ),
+    ] = False,
+    classifier_threshold: Annotated[
+        float | None,
+        typer.Option(help="With --classifier: minimum probability (0-1) to keep a finding."),
+    ] = None,
 ) -> None:
     """Scan PATH for exposed secrets.
 
@@ -152,6 +164,8 @@ def scan(
     """
     if not git_history and (max_commits is not None or since is not None):
         _fail("--max-commits and --since need --git.")
+    if classifier_threshold is not None and not classifier:
+        _fail("--classifier-threshold needs --classifier.")
     try:  # RuleError is a ValueError: one error path for rules and settings
         loaded_rules = load_rules(rules)
         entropy = EntropyConfig(
@@ -160,6 +174,7 @@ def scan(
             min_length=entropy_min_length,
         )
         file_config = load_file_config(config, path)
+        model = load_classifier(threshold=classifier_threshold) if classifier else None
     except ValueError as exc:
         _fail(str(exc), exc)
     detectors = [RegexDetector(loaded_rules), EntropyDetector(entropy)]
@@ -170,11 +185,24 @@ def scan(
         findings, stats = result.findings, result.stats
     filtered = file_config.allowlist.apply(findings)
     findings = filtered.kept
+    rescored = model.rescore(findings) if model else None
+    if rescored:
+        findings = rescored.kept
     _print_findings(findings)
 
     if file_config.source is not None:
         console.print(f"\nConfig: {_safe(str(file_config.source))}")
     console.print(_summary(stats) + _suppressed(filtered))
+    if model and rescored:
+        console.print(
+            f"{rescored.dropped} finding(s) below the classifier threshold "
+            f"{model.threshold:.2f} dropped."
+        )
+        if model.stub:
+            console.print(
+                "[yellow]Warning: the packaged classifier is an untrained stub "
+                "(hand-set weights); its scores are rough.[/yellow]"
+            )
     if findings:
         console.print(f"[red bold]{len(findings)} potential secret(s) found.[/red bold]")
         raise typer.Exit(EXIT_FINDINGS)
