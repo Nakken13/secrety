@@ -75,6 +75,8 @@ class Classifier:
             c * (x - m) / s
             for c, x, m, s in zip(self.coef, extract(finding), self.mean, self.scale, strict=True)
         )
+        if math.isnan(z):  # inf - inf: never drop a finding on a non-number
+            return 1.0
         # Numerically stable sigmoid: exp() of a large positive number overflows.
         if z >= 0:
             return 1.0 / (1.0 + math.exp(-z))
@@ -174,7 +176,12 @@ def _parse(data: Any, name: str, threshold: float | None) -> Classifier:
 
 def _number(value: Any, field: str, fail: _Fail) -> float:
     """Return ``value`` as a finite float; booleans and strings are rejected."""
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    try:
+        finite = not isinstance(value, bool) and isinstance(value, int | float)
+        finite = finite and math.isfinite(value)
+    except OverflowError:  # an int too large for a float
+        finite = False
+    if not finite:
         raise fail(f"{field} must be a finite number, got {value!r}")
     return float(value)
 

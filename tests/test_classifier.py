@@ -202,3 +202,20 @@ def test_error_names_the_file(tmp_path: Path) -> None:
 def test_classifier_error_is_a_value_error() -> None:
     assert issubclass(ClassifierError, ValueError)
     assert 1 in SUPPORTED_SCHEMA_VERSIONS
+
+
+def test_huge_integer_is_rejected_not_crashing(tmp_path: Path) -> None:
+    text = json.dumps(model_dict()).replace('"intercept": 0.0', f'"intercept": {10**400}')
+    with pytest.raises(ClassifierError, match="intercept"):
+        load_classifier(write_model(tmp_path, text))
+
+
+def test_non_finite_score_keeps_the_finding(tmp_path: Path) -> None:
+    # A tiny scale times a huge weight overflows to inf - inf = NaN: never
+    # drop a finding on a score that is not a number.
+    coef = [1e308, -1e308] + [0.0] * (N - 2)
+    scale = [1e-300] * N
+    model = load_classifier(
+        write_model(tmp_path, model_dict(coef=coef, scaler={"mean": [0.0] * N, "scale": scale}))
+    )
+    assert model.probability(make_finding()) == 1.0

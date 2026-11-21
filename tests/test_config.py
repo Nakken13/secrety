@@ -100,3 +100,14 @@ def test_config_file_with_utf8_bom_is_read(tmp_path: Path) -> None:
     # PowerShell 5.1 writes UTF-8 with a byte-order mark.
     (tmp_path / CONFIG_FILE_NAME).write_bytes(b'\xef\xbb\xbf[allowlist]\npaths = ["x/**"]\n')
     assert load_file_config(None, tmp_path).allowlist.paths == ("x/**",)
+
+
+def test_config_can_turn_inline_markers_off(tmp_path: Path) -> None:
+    write_config(tmp_path, "[allowlist]\ninline_ignore = false\n")
+    assert not load_file_config(None, tmp_path).allowlist.inline_ignore
+
+
+def test_inline_ignore_must_be_a_boolean(tmp_path: Path) -> None:
+    write_config(tmp_path, "[allowlist]\ninline_ignore = 0\n")
+    with pytest.raises(ConfigError, match="true or false"):
+        load_file_config(None, tmp_path)

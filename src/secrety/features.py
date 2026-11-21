@@ -103,6 +103,8 @@ def name_tokens(name: str) -> tuple[str, ...]:
 def _charset(secret: str) -> str:
     """Return the narrowest alphabet ``secret`` is drawn from."""
     chars = set(secret)
+    if not chars:
+        return "other"
     if chars <= _HEX:
         return "hex"
     if chars <= _ALNUM:

@@ -51,7 +51,7 @@ class EntropyConfig:
 
 
 CONFIG_FILE_NAME = ".secrety.toml"
-_SECTIONS = {"allowlist": {"paths", "use_defaults"}}
+_SECTIONS = {"allowlist": {"paths", "use_defaults", "inline_ignore"}}
 
 
 class ConfigError(ValueError):
@@ -117,4 +117,7 @@ def _parse_allowlist(data: dict[str, Any], path: Path) -> Allowlist:
     use_defaults = section.get("use_defaults", True)
     if not isinstance(use_defaults, bool):
         raise ConfigError(f"{path}: allowlist.use_defaults must be true or false")
-    return Allowlist(paths=tuple(paths), use_defaults=use_defaults)
+    inline_ignore = section.get("inline_ignore", True)
+    if not isinstance(inline_ignore, bool):
+        raise ConfigError(f"{path}: allowlist.inline_ignore must be true or false")
+    return Allowlist(paths=tuple(paths), use_defaults=use_defaults, inline_ignore=inline_ignore)

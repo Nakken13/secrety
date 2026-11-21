@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from secrety.allowlist import (
@@ -194,3 +196,74 @@ def test_apply_path_wins_over_inline_count() -> None:
     both = make_finding(path="tests/x.py", line_content='p = "FAKE"  # secrety:ignore')
     result = Allowlist().apply([both])
     assert (result.suppressed_by_path, result.suppressed_inline) == (1, 0)
+
+
+# --- review fixes ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'p = "FAKE-value-EXAMPLE"  # secrety:ignore [nope]',  # space before "["
+        'p = "FAKE-value-EXAMPLE"  # secrety:ignore[nope',  # "[" never closed
+        'p = "FAKE-value-EXAMPLE"  # secrety:ignore[generic-password-assignment',
+    ],
+)
+def test_malformed_marker_never_widens_to_ignore_all(line: str) -> None:
+    assert not inline_ignored(make_finding(line_content=line))
+
+
+def test_marker_with_space_before_ids_is_honoured() -> None:
+    line = 'p = "FAKE-value-EXAMPLE"  # secrety:ignore [generic-password-assignment]'
+    assert inline_ignored(make_finding(line_content=line))
+
+
+def test_naming_one_rule_does_not_hide_another_merged_regex_rule() -> None:
+    merged = (
+        ("high-entropy-base64", DetectionMethod.ENTROPY),
+        ("aws-access-key-id", DetectionMethod.REGEX),
+    )
+    line = 'p = "FAKE-value-EXAMPLE"  # secrety:ignore[generic-password-assignment]'
+    assert not inline_ignored(make_finding(line_content=line, also_matched=merged))
+    both = 'p = "x"  # secrety:ignore[generic-password-assignment, aws-access-key-id]'
+    assert inline_ignored(make_finding(line_content=both, also_matched=merged))
+
+
+def test_inline_markers_can_be_turned_off() -> None:
+    finding = make_finding(line_content='p = "FAKE-value-EXAMPLE"  # secrety:ignore')
+    result = Allowlist(inline_ignore=False).apply([finding])
+    assert result.kept == [finding]
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path"),
+    [
+        ("vendor", "vendor/a.py"),  # a bare name also matches a folder
+        ("node_modules", "x/node_modules/a.js"),
+        ("vendor/", "vendor/a.py"),  # trailing "/": the folder
+        ("/vendor/**", "vendor/a.py"),  # leading "/": anchored at the root
+        (r"vendor\**", "vendor/a"),  # Windows separators
+        ("docs/*", "docs/sub/a.md"),  # a matched folder matches its content
+        ("**/**/x", "x"),
+    ],
+)
+def test_gitignore_folder_conventions(pattern: str, path: str) -> None:
+    assert glob_matches(pattern, path)
+
+
+def test_leading_slash_anchors_at_the_root() -> None:
+    assert not glob_matches("/vendor", "lib/vendor/a.py")
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path"),
+    [
+        ("*a*a*a*a*a*a*b", "a" * 60),
+        ("**/**/**/**/**/**/**/x", "/".join(["d"] * 30) + "/y"),
+        ("*a*a*a*a*a*a*a*a*a*a*b", "a" * 2000),
+    ],
+)
+def test_glob_matching_does_not_backtrack(pattern: str, path: str) -> None:
+    start = time.perf_counter()
+    assert not glob_matches(pattern, path)
+    assert time.perf_counter() - start < 0.5

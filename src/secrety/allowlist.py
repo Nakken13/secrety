@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from secrety.models import Finding
+from secrety.models import DetectionMethod, Finding
 
 # Test code, dependency lockfiles (integrity hashes look random) and example
 # files are the usual sources of fake or public values. A real secret
@@ -49,52 +49,87 @@ DEFAULT_ALLOWED_PATHS: tuple[str, ...] = (
 )
 
 # "secrety:ignore" or "secrety:ignore[rule-a, rule-b]", anywhere on the line,
-# so it works after any comment marker (#, //, /* */, <!-- -->, --, ;).
-_IGNORE = re.compile(r"(?<![\w-])secrety:ignore(?![\w-])(?:\[([^\]]*)\])?", re.IGNORECASE)
+# so it works after any comment marker (#, //, /* */, <!-- -->, --, ;). Group
+# 1 is "[" when ids follow, group 2 the ids, group 3 the closing "]".
+_IGNORE = re.compile(r"(?<![\w-])secrety:ignore(?![\w-])(?:\s*(\[)([^\]\n]*)(\])?)?", re.IGNORECASE)
 
 
-def _glob_to_regex(pattern: str) -> str:
-    """Translate a glob into a regex matching a whole ``/``-separated path.
+def _segment_matches(pattern: str, name: str) -> bool:
+    """Match one path segment against ``*`` / ``?`` wildcards, without backtracking.
 
-    ``*`` and ``?`` stay inside one path segment; ``**`` spans folders
-    (``**/`` matches zero or more of them). A pattern without ``/`` matches
-    the file name at any depth, as in ``.gitignore``.
+    The classic two-pointer algorithm: on a mismatch, only the last ``*`` is
+    retried, one character further. Cost is at most ``len(pattern) *
+    len(name)``, so a pattern from an untrusted ``.secrety.toml`` such as
+    ``*a*a*a*a*b`` cannot stall the scan (a translated regex backtracks
+    exponentially on it).
     """
-    if "/" not in pattern:
-        pattern = "**/" + pattern
-    out: list[str] = []
-    i = 0
-    while i < len(pattern):
-        if pattern.startswith("**/", i):
-            out.append("(?:[^/]*/)*")
-            i += 3
-        elif pattern.startswith("**", i):
-            out.append(".*")
-            i += 2
-        elif pattern[i] == "*":
-            out.append("[^/]*")
-            i += 1
-        elif pattern[i] == "?":
-            out.append("[^/]")
-            i += 1
+    p = n = 0
+    star = -1
+    resume = 0
+    while n < len(name):
+        if p < len(pattern) and pattern[p] in ("?", name[n]):
+            p += 1
+            n += 1
+        elif p < len(pattern) and pattern[p] == "*":
+            star, resume = p, n
+            p += 1
+        elif star != -1:
+            resume += 1
+            p, n = star + 1, resume
         else:
-            out.append(re.escape(pattern[i]))
-            i += 1
-    return "".join(out)
+            return False
+    return pattern[p:].strip("*") == ""
 
 
 @lru_cache(maxsize=256)
-def _compile(pattern: str) -> re.Pattern[str]:
-    """Compile ``pattern`` once; allowlists are small and reused for every finding."""
-    return re.compile(_glob_to_regex(pattern), re.IGNORECASE)
+def _segments(pattern: str) -> tuple[str, ...]:
+    r"""Normalise a glob into lowercase path segments, ``.gitignore`` style.
+
+    ``\`` becomes ``/``; a leading ``/`` anchors at the root; a pattern with
+    no other ``/`` matches at any depth (``**/`` is prepended); a trailing
+    ``/`` is dropped (matching a folder already covers its content); runs of
+    ``**`` collapse into one.
+    """
+    pattern = pattern.replace("\\", "/").lower()
+    if pattern.startswith("/"):
+        pattern = pattern.lstrip("/")
+    elif "/" not in pattern.rstrip("/"):
+        pattern = "**/" + pattern
+    segments: list[str] = []
+    for segment in pattern.split("/"):
+        if segment and not (segment == "**" and segments and segments[-1] == "**"):
+            segments.append(segment)
+    return tuple(segments)
 
 
 def glob_matches(pattern: str, path: str) -> bool:
     """Return True if ``path`` (relative, ``/`` separators) matches ``pattern``.
 
-    Matching ignores case: Windows and macOS file systems do.
+    ``*`` and ``?`` stay inside one segment, ``**`` spans folders (zero or
+    more). As in ``.gitignore``, a pattern that matches a folder matches
+    everything inside it (``vendor`` matches ``vendor/a.py``). Matching
+    ignores case: Windows and macOS file systems do.
     """
-    return _compile(pattern).fullmatch(path) is not None
+    parts = path.lower().split("/")
+    # Indices into ``parts`` reachable after matching the segments so far.
+    states = {0}
+    for segment in _segments(pattern):
+        if segment == "**":
+            states = set(range(min(states), len(parts) + 1))
+        else:
+            states = {
+                i + 1 for i in states if i < len(parts) and _segment_matches(segment, parts[i])
+            }
+        if not states:
+            return False
+    # Matched the whole path (a file) or a prefix of it (a folder holding it).
+    return max(states) >= 1
+
+
+@lru_cache(maxsize=4096)
+def _allowed(patterns: tuple[str, ...], path: str) -> bool:
+    """Cached :meth:`Allowlist.allows_path`: a file often has several findings."""
+    return any(glob_matches(pattern, path) for pattern in patterns)
 
 
 def inline_ignored(finding: Finding) -> bool:
@@ -102,17 +137,22 @@ def inline_ignored(finding: Finding) -> bool:
 
     A bare marker ignores every finding on the line. With rule ids
     (``secrety:ignore[rule-a,rule-b]``) the finding is ignored when the ids
-    include the rule it is *reported* under. Rules merged into it
-    (:attr:`~secrety.models.Finding.also_matched`) flagged the same span, so
-    they are covered too; naming only a merged rule (typically the entropy
-    one) does not hide what the reported rule, a known format, found.
+    include the rule it is reported under and every other *regex* rule
+    merged into it (:attr:`~secrety.models.Finding.also_matched`). Merged
+    entropy findings flag the same value and need not be named; another
+    known format overlapping it must be. A malformed marker (``[`` never
+    closed) ignores nothing: a typo must not widen the suppression.
     """
-    reported = finding.rule_id.lower()
+    needed = {finding.rule_id.lower()} | {
+        rule_id.lower()
+        for rule_id, method in finding.also_matched
+        if method is DetectionMethod.REGEX
+    }
     for match in _IGNORE.finditer(finding.line_content):
-        listed = match.group(1)
-        if listed is None:
+        opened, listed, closed = match.groups()
+        if opened is None:
             return True
-        if reported in {part.strip().lower() for part in listed.split(",")}:
+        if closed is not None and needed <= {part.strip().lower() for part in listed.split(",")}:
             return True
     return False
 
@@ -133,10 +173,13 @@ class Allowlist:
     Attributes:
         paths: Extra globs (see :func:`glob_matches`), added to the defaults.
         use_defaults: Include :data:`DEFAULT_ALLOWED_PATHS`.
+        inline_ignore: Honour ``secrety:ignore`` markers. Turn it off to scan
+            code you do not trust: its markers would hide its own findings.
     """
 
     paths: tuple[str, ...] = ()
     use_defaults: bool = True
+    inline_ignore: bool = True
     patterns: tuple[str, ...] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -146,7 +189,7 @@ class Allowlist:
 
     def allows_path(self, path: str) -> bool:
         """Return True if findings in ``path`` are dropped."""
-        return any(glob_matches(pattern, path) for pattern in self.patterns)
+        return _allowed(self.patterns, path)
 
     def apply(self, findings: Iterable[Finding]) -> FilterResult:
         """Split ``findings`` into kept ones and counts of suppressed ones.
@@ -159,7 +202,7 @@ class Allowlist:
         for finding in findings:
             if self.allows_path(finding.path):
                 by_path += 1
-            elif inline_ignored(finding):
+            elif self.inline_ignore and inline_ignored(finding):
                 inline += 1
             else:
                 kept.append(finding)

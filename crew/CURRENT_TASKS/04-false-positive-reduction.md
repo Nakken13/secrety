@@ -15,3 +15,6 @@ Carried over from 01 (review / self-scan):
 - [x] Self-scan of this repo is clean: allowlist `tests/` (fakes.py, test_cli.py hostile-markup case), `# secrety:ignore` on the url-credentials regex line of default_rules.yaml (matches itself), and the pyproject `secrety = "secrety.cli:app"` hit (keyword inside the tool's own name) handled by the classifier or an allowlist
 - [x] Lint custom `--rules` files for unbounded quantifiers (`+`, `*`, `{n,}`) and warn (ReDoS guarantee currently holds for bundled rules only)
 - [x] Count links/junctions skipped by the filesystem walk in ScanStats; check whether `_is_link` should test `st_reparse_tag` (symlink / mount point) instead of every reparse point
+
+Close in progress (2026-11-21): deep review done, items 1-9 fixed in the last commit (marker typo no longer widens, `allowlist.inline_ignore` off switch, gitignore-style non-backtracking globs, overflow/NaN guards, empty-secret charset). Item 10 (`re._parser` private) declined: present 3.11-3.14, tests catch a move.
+Resume with `/crew-close-task`: still to do — docs for `inline_ignore` + gitignore globs in `docs/methodology.md`, widen 06 carry-over (scan root != repo root; inline markers now switchable), AGENTS.md map (`filtering/` -> top-level modules), `simplify` pass, then history/tests/merge.

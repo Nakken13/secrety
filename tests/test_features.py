@@ -165,3 +165,9 @@ def test_unknown_extension_maps_to_zeros() -> None:
 def test_extract_is_deterministic() -> None:
     finding = make_finding()
     assert extract(finding) == extract(finding)
+
+
+def test_empty_secret_has_no_charset_class() -> None:
+    f = features(make_finding(secret="", line_content='api_key = ""'))
+    assert f["charset_other"] == 1.0
+    assert f["charset_hex"] == 0.0
