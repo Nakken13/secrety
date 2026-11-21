@@ -12,7 +12,7 @@ ruff, matplotlib (evaluation only), GitHub Actions CI.
 ## Repository map
 
 ```text
-src/secrety/         # package: cli, scanner, detectors/, sources/, filtering/, reporters/, rules/
+src/secrety/         # package: cli, scanner, config, models, allowlist, features, classifier (+ data/), detectors/, sources/, rules/ (reporters/ planned, task 05)
 tests/               # pytest unit + integration (temporary git repos via tmp_path)
 evaluation/          # synthetic corpus generator, metrics, benchmark vs gitleaks/trufflehog, plots
 docs/                # methodology, architecture, images for the README
