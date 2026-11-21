@@ -10,6 +10,7 @@ from conftest import GitRepo
 from secrety.detectors import RegexDetector
 from secrety.rules import load_rules
 from secrety.scanner import scan
+from secrety.sources import FilesystemSource
 from secrety.sources.git import GitSource
 from test_models import make_finding
 
@@ -132,10 +133,10 @@ def test_secret_moved_to_another_file_is_not_marked_removed(git_repo: GitRepo) -
 
 
 def test_secret_inside_a_longer_secret_in_head_is_not_removed(git_repo: GitRepo) -> None:
-    # git grep -o prints the longest match only, so "FAKEshort" is never printed.
-    git_repo.commit("one", **{"a.env": "K=FAKEshortFAKElonger\n"})
-    short = make_finding(commit="0" * 40, secret="FAKEshort", line_content="K=FAKEshort")
-    long = make_finding(commit="0" * 40, secret="FAKEshortFAKElonger", line_content="K=")
+    short_value, long_value = "FAKE" + "short", "FAKE" + "shortFAKElonger"
+    git_repo.commit("one", **{"a.env": f"K={long_value}\n"})
+    short = make_finding(commit="0" * 40, secret=short_value, line_content="K=")
+    long = make_finding(commit="0" * 40, secret=long_value, line_content="K=")
     marked = GitSource(git_repo.path).mark_removed([short, long])
     assert [f.removed_later for f in marked] == [False, False]
 
@@ -303,8 +304,9 @@ def test_secrets_are_not_passed_on_the_command_line(
 
 def test_overlapping_secrets_both_found_in_head(git_repo: GitRepo) -> None:
     git_repo.commit("one", **{"a.env": "K=abcFAKEXYZdef\n"})
-    first = make_finding(commit="0" * 40, secret="abcFAKEXYZ", line_content="K=")
-    second = make_finding(commit="0" * 40, secret="FAKEXYZdef", line_content="K=")
+    first_value, second_value = "abc" + "FAKEXYZ", "FAKEXYZ" + "def"
+    first = make_finding(commit="0" * 40, secret=first_value, line_content="K=")
+    second = make_finding(commit="0" * 40, secret=second_value, line_content="K=")
     marked = GitSource(git_repo.path).mark_removed([first, second])
     assert [f.removed_later for f in marked] == [False, False]
 
@@ -321,3 +323,13 @@ def test_a_nul_line_added_mid_file_does_not_hide_the_next_lines(git_repo: GitRep
     findings = scan(source, [RegexDetector(load_rules())]).findings
     assert [(f.commit, f.line) for f in findings] == [(leak, 102)]
     assert source.stats.skipped_binary == 0
+
+
+def test_a_secret_on_a_line_with_a_nul_past_the_head_is_scanned(git_repo: GitRepo) -> None:
+    head = "x" * 100 + "\n"
+    git_repo.commit("text", **{"a.env": head * 100})
+    leak = git_repo.commit("leak", **{"a.env": head * 100 + f"T={fakes.GITHUB_TOKEN}\x00\n"})
+    findings = scan(GitSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert [(f.commit, f.line) for f in findings] == [(leak, 101)]
+    disk = scan(FilesystemSource(git_repo.path), [RegexDetector(load_rules())]).findings
+    assert [f.line for f in disk] == [101]

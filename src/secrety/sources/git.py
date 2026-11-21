@@ -70,16 +70,15 @@ class _Pending:
         untrusted, binary attributes, and it is judged as for a file on disk:
         the version is binary only when a NUL shows up in its first 8 KiB,
         i.e. while the added lines run unbroken from line 1. Anywhere else, a
-        line holding a NUL is skipped alone, so it cannot hide the lines
-        around it from the scan.
+        line holding a NUL is scanned like any other, as the whole file would
+        be on disk, so a NUL cannot hide a secret.
         """
         if self.too_large or self.binary:
             return
-        if b"\x00" in raw:
-            at_head = self.size < BINARY_SNIFF_SIZE and number == len(self.lines) + 1
-            if at_head and is_binary(raw[: BINARY_SNIFF_SIZE - self.size]):
-                self.binary = True
-                self.lines.clear()
+        at_head = self.size < BINARY_SNIFF_SIZE and number == len(self.lines) + 1
+        if at_head and is_binary(raw[: BINARY_SNIFF_SIZE - self.size]):
+            self.binary = True
+            self.lines.clear()
             return
         self.size += len(raw) + 1
         if self.size > max_size:
