@@ -49,7 +49,7 @@ class OutputFormat(StrEnum):
 app = typer.Typer(
     name="secrety",
     help="Scan source code and Git history for exposed secrets.",
-    no_args_is_help=True,
+    invoke_without_command=True,
     add_completion=False,
 )
 # emoji=False: a location such as "a.py:100:3" would print ":100:" as an emoji.
@@ -67,6 +67,7 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool,
         typer.Option(
@@ -78,7 +79,15 @@ def main(
         ),
     ] = False,
 ) -> None:
-    """Scan source code and Git history for exposed secrets."""
+    """Scan source code and Git history for exposed secrets.
+
+    Without a subcommand, opens the interactive menu.
+    """
+    if ctx.invoked_subcommand is None:
+        # Imported here: the menu is only needed in interactive use.
+        from secrety.tui import main as menu
+
+        menu()
 
 
 @app.command()

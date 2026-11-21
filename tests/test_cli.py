@@ -21,8 +21,8 @@ def test_version_flag_prints_version() -> None:
     assert __version__ in result.output
 
 
-def test_no_args_shows_help() -> None:
-    result = runner.invoke(app, [])
+def test_help_lists_scan() -> None:
+    result = runner.invoke(app, ["--help"])
     assert "scan" in result.output
 
 

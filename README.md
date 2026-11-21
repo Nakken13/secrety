@@ -51,6 +51,13 @@ pip install -e ".[dev]"      # add ",eval" to rerun the evaluation
 ## Usage
 
 ```bash
+secrety                                 # interactive menu (banner, numbered choices)
+```
+
+The menu walks you through folder, Git-history and staged scans, shows findings as cards per file
+(secrets masked) and can save a text, JSON or SARIF report. For CI and fine-tuning use `scan`:
+
+```bash
 secrety scan .                          # files on disk
 secrety scan . --git                    # every line ever added, all commits reachable from HEAD
 secrety scan . --git --max-commits 200  # only the 200 newest commits
