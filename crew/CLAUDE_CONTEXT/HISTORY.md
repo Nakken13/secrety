@@ -66,3 +66,12 @@ Deferred: entropy thresholds not re-tuned on the corpus; the combined-variant sc
 Reviews: deep — reviewer (3 important fixed: version pin enforced, secret-family recall table emitted, timing crash check; docs numbers corrected) + 4-angle simplify (applied: plots split, `Row` to metrics, single validation scan, comment-template table, `_exe`/`_relative`, `corpora/` rename; skipped: RNG-changing `_pick_family` rewrite, fixture sharing, `Truth` object).
 Key commits: 246cb82 on crew/batch-a.
 Tests: DEV checklist `crew/TESTS/DEV/07-evaluation.md` (2 boxes): CI matrix with the eval extra and a Linux/macOS rerun; the rest covered by 568 pytest, 93 % coverage.
+
+## 08-docs-release — 2026-11-21
+What: README (sourced leak cases: Toyota 2022, Uber 2016, GitGuardian 2023; Mermaid pipeline; install, usage, results from 07 with the synthetic-corpus caveat, limits, future work, ethics), `docs/demo.svg` (rendered terminal capture of a scan on fake secrets), CHANGELOG 0.1.0 (Keep a Changelog), version `0.1.0` in `src/secrety/__init__.py`. LICENSE was already MIT.
+Why some decisions: demo is an SVG, not a GIF (no terminal recorder available); README does not claim secrety beats gitleaks/trufflehog; Uber FTC claim left out (not verified). Tag created locally; push and GitHub release left to the dev (outward-facing).
+Verification: clean-venv install, every README command run on a throwaway git repo (all exit codes as documented, `--git` shows a removed secret), 559 pytest passed (5 skipped), 85.7 % coverage, ruff check and format clean, self-scan clean.
+Reviews: quick — docs plus a one-line version bump, own read of the diff.
+Key commits: 6a1d62e on crew/batch-a.
+Tests: DEV checklist `crew/TESTS/DEV/08-docs-release.md` (5 boxes): push, release, GitHub rendering, optional GIF, pipx install from the pushed repo.
+
