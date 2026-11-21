@@ -12,3 +12,8 @@ Zone : `evaluation/`, `src/secrety/data/`, `docs/results/`, `tests/test_eval_*.p
 - [ ] Benchmark vs gitleaks and trufflehog (`--no-verification`), pinned versions, timing, same corpus
 - [ ] matplotlib plots + markdown results table in `docs/results/`
 - [ ] Tests for generator determinism and metrics; coverage >= 80%
+
+Carried over from 04:
+- [ ] Settle the marker conflict: `features.value_placeholder` fires on `fake`/`example`, the markers AGENTS.md requires on fake values. Either drop those words from the feature (and retrain) or keep them out of the runtime corpus; decide before training
+- [ ] `evaluation/export_model.py` imports `secrety.features.FEATURE_NAMES` and writes `src/secrety/data/classifier.json` (schema in `docs/decisions/0001-classifier-format.md`, `training.stub: false`); a test checks pure-Python `Classifier.probability` matches sklearn `predict_proba` to 1e-9
+- [ ] Train through `secrety.features.extract` only (same features at scan and training time); report metrics with and without `--classifier`
