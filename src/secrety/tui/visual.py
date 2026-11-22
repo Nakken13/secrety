@@ -64,17 +64,21 @@ def render_menu(
     rows.add_column(justify="right")
     rows.add_column(no_wrap=True)
     for number, option in enumerate(options, start=1):
-        rows.add_row(Text(f"[{number}]", style="bold cyan"), Text(option, style="bold"))
+        rows.add_row(Text(f"[{number}]", style="bold color(208)"), Text(option, style="bold"))
     keys = Text()
     if info:
-        keys.append("[0]", style="bold cyan").append("  Info", style="dim").append("        ")
+        keys.append("[0]", style="bold color(208)").append("  Info", style="dim").append("        ")
     keys.append("[q]", style="bold color(208)").append(f"  {back}", style="dim")
     panel = Panel(
-        Group(rows, Rule(style="dim", characters="─" if unicode_ok else "-"), Align.center(keys)),
+        Group(
+            rows,
+            Rule(style="color(94)", characters="─" if unicode_ok else "-"),
+            Align.center(keys),
+        ),
         title=Text(title, style="bold"),
         title_align="left",
         box=box.ROUNDED if unicode_ok else box.ASCII,
-        border_style="cyan",
+        border_style="color(166)",
         padding=(0, 2),
         width=min(terminal, _PANEL_WIDTH),
     )
@@ -92,7 +96,7 @@ def render_info(title: str, lines: Iterable[str], *, color: bool = False) -> str
         title=Text(title, style="bold"),
         title_align="left",
         box=box.ROUNDED if _unicode_printable() else box.ASCII,
-        border_style="cyan",
+        border_style="color(166)",
         padding=(0, 2),
         width=min(terminal, _PANEL_WIDTH),
     )
@@ -127,7 +131,7 @@ def render_cards(findings: Sequence[Finding], *, color: bool = False) -> str:
 def _finding_line(f: Finding, unicode_ok: bool) -> Text:
     where = f"{f.commit[:7]}:" if f.commit else ""
     line = Text.from_markup(
-        f"{'▸ ' if unicode_ok else '- '}[cyan]{where}{f.line}:{f.column}[/cyan]  "
+        f"{'▸ ' if unicode_ok else '- '}[color(208)]{where}{f.line}:{f.column}[/color(208)]  "
         f"[bold]{safe(f.rule_id)}[/bold]  {safe(f.masked())}  [dim]{f.confidence:.2f}[/dim]"
     )
     if f.removed_later:
