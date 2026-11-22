@@ -157,7 +157,7 @@ def _after_results(results: _Results, mode: int, input_fn: InputFn, print_fn: Pr
 def show_banner(print_fn: PrintFn) -> None:
     """Clear the screen and print the banner."""
     print_fn(
-        _CLEAR_SCREEN + "\n" + banner().rstrip("\n")
+        _CLEAR_SCREEN + "\n" + banner(color=sys.stdout.isatty()).rstrip("\n")
     )  # the menu adds its own leading blank line
 
 
