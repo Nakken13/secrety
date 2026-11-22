@@ -39,10 +39,13 @@ def _fire(index: int, total: int) -> int:
 def banner(*, color: bool = False) -> str:
     """Padlock, `Secrety`, then version and author, centered; `color` adds a fire gradient."""
     terminal = shutil.get_terminal_size((80, 24)).columns
-    art = [line.center(terminal).rstrip() for line in (*_LOCK, *_TITLE)]
+    lock = [line.center(terminal).rstrip() for line in _LOCK]
     if color:
-        art = [f"\x1b[38;5;{_fire(n, len(art))}m{line}\x1b[0m" for n, line in enumerate(art)]
-    lines = [*art, ""]
+        lock = [f"[38;5;{_fire(n, len(lock))}m{line}[0m" for n, line in enumerate(lock)]
+    # same width for every title line, or center() shifts each one differently
+    width = max(len(line) for line in _TITLE)
+    title = [line.ljust(width).center(terminal).rstrip() for line in _TITLE]
+    lines = [*lock, *title, ""]
     lines.append(f"v{__version__}".center(terminal).rstrip())
     lines.append("Made by Nakken".center(terminal).rstrip())
     return "\n".join(lines) + "\n"
